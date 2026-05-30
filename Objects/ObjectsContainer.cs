@@ -19,6 +19,8 @@ namespace EOS.Objects
             _updates.Clear();
             _fixedUpdates.Clear();
             _lateUpdates.Clear();
+            _inited.Clear();
+            _waiting.Clear();
         }
 
         public static void Update(float deltaTime)

@@ -37,7 +37,7 @@ namespace EOS.Storage
             _ownerVersions[i] = entity.Version;
             _index[key] = i;
             _data[i] = new T();
-            _data[i].SetEntity(entity);
+            _data[i].SetupObject(entity);
             return _data[i];
         }
 

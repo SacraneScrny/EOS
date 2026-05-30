@@ -37,26 +37,23 @@ namespace EOS.Systems.CommandBuffer
 
         public void Execute()
         {
-            // проход 1 — создаём сущности и резолвим токены
             for (int i = 0; i < _creates.Count; i++)
             {
                 var (name, deferred) = _creates[i];
                 try
                 {
-                    deferred.Value = new EosEntity(name);
+                    deferred.Value = new EosEntity(name, true);
                     deferred.IsResolved = true;
                 }
                 catch { }
             }
 
-            // проход 2 — обычные батчи
             for (int i = 0; i < _batches.Count; i++)
             {
                 var (entity, ops) = _batches[i];
                 RunOps(entity, ops);
             }
 
-            // проход 3 — деферред батчи
             for (int i = 0; i < _deferredBatches.Count; i++)
             {
                 var (deferred, ops) = _deferredBatches[i];

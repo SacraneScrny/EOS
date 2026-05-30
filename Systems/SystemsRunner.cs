@@ -35,7 +35,7 @@ namespace EOS.Systems
                     .Where(m => m.Name == EXECUTE_METHOD);
 
                 if (!methods.Any())
-                    throw new Exception($"{type.Name} must have at least one Execute method");
+                    continue;
 
                 var groupAttr = type.GetCustomAttribute<GroupAttribute>();
                 Func<bool> isUpdate = groupAttr != null

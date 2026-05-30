@@ -17,10 +17,11 @@ namespace EOS.Objects
         protected bool _enabled = true;
         public EosEntity Entity { get; private set; } = EosEntity.Null;
 
-        internal void SetEntity(EosEntity entity)
+        internal void SetupObject(EosEntity entity)
         {
             Entity = entity;
             HasEntity = true;
+            ObjectsContainer.RegisterObject(this);
         }
 
         internal void Awake()
@@ -34,7 +35,6 @@ namespace EOS.Objects
         internal void Start()
         {
             if (!IsAwaken || IsStarted) return;
-            ObjectsContainer.RegisterObject(this);
             IsStarted = true;
             OnStart();
         }
