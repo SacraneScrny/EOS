@@ -1,31 +1,33 @@
 using System.Collections.Generic;
 
+using EOS.Core;
 using EOS.Entities;
 using EOS.Objects;
 
 namespace EOS.Systems
 {
-    internal static class InitializeSystemRunner
+    public class InitializeSystemRunner : WorldBound
     {
-        static readonly List<EosObject> _batch = new();
+        readonly List<EosObject> _batch = new();
+        public IReadOnlyList<EosObject> Batch => _batch;
 
-        public static void Run()
+        internal void Run()
         {
             _batch.Clear();
-            _batch.AddRange(ObjectsContainer.Waiting);
+            _batch.AddRange(World.Objects.Waiting);
 
             for (int i = _batch.Count - 1; i >= 0; i--)
             {
                 var obj = _batch[i];
 
-                if (!EntitiesContainer.IsValid(obj.Entity))
+                if (!World.Entities.IsValid(obj.Entity))
                 {
                     obj.Dispose();
                     _batch.RemoveAt(i);
-                    ObjectsContainer.MarkFailed(obj);
+                    World.Objects.MarkFailed(obj);
                     continue;
                 }
-                if (!EntitiesContainer.IsActive(obj.Entity)) continue;
+                if (!World.Entities.IsActive(obj.Entity)) continue;
 
                 obj.Awake();
             }
@@ -34,7 +36,7 @@ namespace EOS.Systems
             {
                 var obj = _batch[i];
                 obj.Start();
-                ObjectsContainer.MarkInitialized(obj);
+                World.Objects.MarkInitialized(obj);
             }
         }
     }

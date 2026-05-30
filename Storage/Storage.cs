@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 
+using EOS.Core;
 using EOS.Entities;
 using EOS.Objects;
 
 namespace EOS.Storage
 {
-    public class Storage<T> : IStorage, IIndexedStorage
+    public class Storage<T> : WorldBound, IStorage, IIndexedStorage
         where T : EosObject, new()
     {
         T[] _data = new T[1024];
@@ -53,7 +54,7 @@ namespace EOS.Storage
             return false;
         }
         public bool Has(EosEntity entity) => _index.ContainsKey(Key(entity));
-        public EosEntity GetOwner(int index) => new(_owners[index], _ownerVersions[index]);
+        public EosEntity GetOwner(int index) => new(_owners[index], _ownerVersions[index], World);
 
         public bool Remove(EosEntity entity)
         {

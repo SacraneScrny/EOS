@@ -2,13 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+
+using EOS.Core;
 using EOS.Entities;
 using EOS.Objects;
 using EOS.Storage;
 
 namespace EOS.Systems
 {
-    internal static partial class SystemsRunner
+    public partial class SystemsRunner : WorldBound
     {
         const string EXECUTE_METHOD = "Execute";
         const string GET = "Get";
@@ -16,7 +18,7 @@ namespace EOS.Systems
         const string GET_OWNER = "GetOwner";
         const string COUNT = "Count";
 
-        static Action<float> BuildQuery(object instance, MethodInfo method)
+        Action<float> BuildQuery(object instance, MethodInfo method)
         {
             var parameters = method.GetParameters();
             int entityParamIndex = -1;
@@ -142,7 +144,7 @@ namespace EOS.Systems
             };
         }
 
-        static Action<float> BuildNoComponentQuery(
+        Action<float> BuildNoComponentQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
@@ -163,7 +165,7 @@ namespace EOS.Systems
                 var args = new object[parameters.Length];
                 if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
 
-                foreach (var entity in EntitiesContainer.All())
+                foreach (var entity in World.Entities.All())
                 {
                     if (!CheckIncludeExclude(entity,
                         includeStorages, includeHasMethods,
@@ -175,7 +177,7 @@ namespace EOS.Systems
             };
         }
 
-        static Action<float> BuildInterfaceOnlyQuery(
+        Action<float> BuildInterfaceOnlyQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
             List<(int position, Type type)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
@@ -186,7 +188,7 @@ namespace EOS.Systems
 
             return (deltaTime) =>
             {
-                var pivotStorages = StorageMap.GetByInterface(pivotIfaceType);
+                var pivotStorages = World.ObjectsStorages.GetByInterface(pivotIfaceType);
                 if (pivotStorages == null) return;
 
                 foreach (var storage in pivotStorages)
@@ -233,9 +235,9 @@ namespace EOS.Systems
             };
         }
 
-        static object FindInterfaceComponent(EosEntity entity, Type interfaceType)
+        object FindInterfaceComponent(EosEntity entity, Type interfaceType)
         {
-            var storages = StorageMap.GetByInterface(interfaceType);
+            var storages = World.ObjectsStorages.GetByInterface(interfaceType);
             if (storages == null) return null;
 
             foreach (var storage in storages)
@@ -248,7 +250,7 @@ namespace EOS.Systems
             return null;
         }
 
-        static bool CheckFilters(
+        bool CheckFilters(
             EosEntity entity,
             object[] concreteStorages, MethodInfo[] concreteHasMethods, int pivot,
             object[] includeStorages, MethodInfo[] includeHasMethods,
@@ -265,7 +267,7 @@ namespace EOS.Systems
                 excludeStorages, excludeHasMethods);
         }
 
-        static bool CheckIncludeExclude(
+        bool CheckIncludeExclude(
             EosEntity entity,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
@@ -281,19 +283,19 @@ namespace EOS.Systems
             return true;
         }
 
-        static object ResolveConcreteStorage(Type componentType)
+        object ResolveConcreteStorage(Type componentType)
         {
-            var method = typeof(StorageMap)
-                .GetMethod(nameof(StorageMap.Get), BindingFlags.Static | BindingFlags.Public)
+            var method = typeof(ObjectsStorageMap)
+                .GetMethod(nameof(ObjectsStorageMap.Get), BindingFlags.Static | BindingFlags.Public)
                 ?? throw new Exception("StorageMap.Get<T>() not found");
             return method.MakeGenericMethod(componentType).Invoke(null, null);
         }
 
-        static MethodInfo GetMethod(object obj, string name) =>
+        MethodInfo GetMethod(object obj, string name) =>
             obj.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.Public)
             ?? throw new Exception($"{name} not found on {obj.GetType().Name}");
 
-        static PropertyInfo GetProp(object obj, string name) =>
+        PropertyInfo GetProp(object obj, string name) =>
             obj.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public)
             ?? throw new Exception($"{name} not found on {obj.GetType().Name}");
     }

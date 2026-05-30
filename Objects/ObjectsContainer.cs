@@ -1,20 +1,22 @@
 using System.Collections.Generic;
 
+using EOS.Core;
 using EOS.Objects.Interfaces;
 
 namespace EOS.Objects
 {
-    internal static class ObjectsContainer
+    public class ObjectsContainer : WorldBound
     {
-        static readonly List<IObjectUpdate> _updates = new();
-        static readonly List<IObjectFixedUpdate> _fixedUpdates = new();
-        static readonly List<IObjectLateUpdate> _lateUpdates = new();
-        static readonly List<EosObject> _inited = new();
-        static readonly List<EosObject> _waiting = new();
+        readonly List<IObjectUpdate> _updates = new();
+        readonly List<IObjectFixedUpdate> _fixedUpdates = new();
+        readonly List<IObjectLateUpdate> _lateUpdates = new();
+        readonly List<EosObject> _inited = new();
+        readonly List<EosObject> _waiting = new();
 
-        public static IEnumerable<EosObject> Waiting => _waiting;
+        public IEnumerable<EosObject> All => _inited;
+        internal IEnumerable<EosObject> Waiting => _waiting;
 
-        public static void Init()
+        internal void Reset()
         {
             _updates.Clear();
             _fixedUpdates.Clear();
@@ -23,26 +25,26 @@ namespace EOS.Objects
             _waiting.Clear();
         }
 
-        public static void Update(float deltaTime)
+        internal void Update(float deltaTime)
         {
             for (int i = 0; i < _updates.Count; i++)
                 if (_updates[i].IsEnabled)
                     _updates[i].OnUpdate(deltaTime);
         }
-        public static void FixedUpdate(float deltaTime)
+        internal void FixedUpdate(float deltaTime)
         {
             for (int i = 0; i < _fixedUpdates.Count; i++)
                 if (_fixedUpdates[i].IsEnabled)
                     _fixedUpdates[i].OnFixedUpdate(deltaTime);
         }
-        public static void LateUpdate(float deltaTime)
+        internal void LateUpdate(float deltaTime)
         {
             for (int i = 0; i < _lateUpdates.Count; i++)
                 if (_lateUpdates[i].IsEnabled)
                     _lateUpdates[i].OnLateUpdate(deltaTime);
         }
 
-        public static void RegisterObject(EosObject obj)
+        internal void RegisterObject(EosObject obj)
         {
             if (obj == null) return;
             if (obj is IObjectUpdate u) _updates.Add(u);
@@ -50,7 +52,7 @@ namespace EOS.Objects
             if (obj is IObjectLateUpdate lu) _lateUpdates.Add(lu);
             _waiting.Add(obj);
         }
-        public static void UnregisterObject(EosObject obj)
+        internal void UnregisterObject(EosObject obj)
         {
             if (obj == null) return;
             if (obj is IObjectUpdate u) _updates.Remove(u);
@@ -60,11 +62,11 @@ namespace EOS.Objects
             _inited.Remove(obj);
         }
 
-        public static void MarkInitialized(EosObject obj)
+        internal void MarkInitialized(EosObject obj)
         {
             _waiting.Remove(obj);
             _inited.Add(obj);
         }
-        public static void MarkFailed(EosObject obj) => UnregisterObject(obj);
+        internal void MarkFailed(EosObject obj) => UnregisterObject(obj);
     }
 }

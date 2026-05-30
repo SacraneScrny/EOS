@@ -1,12 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
 
+using EOS.Core;
 using EOS.Entities;
 
 namespace EOS.Systems.CommandBuffer
 {
-    public class EntityCommandBuffer
+    public interface IReadOnlyEntityCommandBuffer
     {
+        public DeferredEntity Create(string name = "");
+        public BoundSchedule Schedule(EosEntity entity);
+        public BoundSchedule Schedule(DeferredEntity deferred);
+        public void Schedule(EosEntity entity, CommandChain chain);
+        public void Schedule(DeferredEntity deferred, CommandChain chain);
+    }
+    public class EntityCommandBuffer : IReadOnlyEntityCommandBuffer
+    {
+        readonly World _world;
+        public EntityCommandBuffer(World world) => _world = world;
+        
         readonly List<(string name, DeferredEntity deferred)> _creates = new();
         readonly List<(EosEntity entity, List<Func<EosEntity, bool>> ops)> _batches = new();
         readonly List<(DeferredEntity deferred, List<Func<EosEntity, bool>> ops)> _deferredBatches = new();
@@ -42,7 +54,7 @@ namespace EOS.Systems.CommandBuffer
                 var (name, deferred) = _creates[i];
                 try
                 {
-                    deferred.Value = new EosEntity(name, true);
+                    deferred.Value = new EosEntity(_world, name, true);
                     deferred.IsResolved = true;
                 }
                 catch { }
@@ -65,7 +77,6 @@ namespace EOS.Systems.CommandBuffer
             _batches.Clear();
             _deferredBatches.Clear();
         }
-
         public void Clear()
         {
             _creates.Clear();

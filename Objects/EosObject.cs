@@ -21,7 +21,7 @@ namespace EOS.Objects
         {
             Entity = entity;
             HasEntity = true;
-            ObjectsContainer.RegisterObject(this);
+            Entity.World.Objects.RegisterObject(this);
         }
 
         internal void Awake()
@@ -63,7 +63,7 @@ namespace EOS.Objects
             _disposables = null;
 
             OnDispose();
-            ObjectsContainer.UnregisterObject(this);
+            Entity.World.Objects.UnregisterObject(this);
         }
         protected virtual void OnDispose() { }
 

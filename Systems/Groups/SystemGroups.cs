@@ -1,14 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 
+using EOS.Core;
+
 namespace EOS.Systems.Groups
 {
-    internal static class SystemGroups
+    public class SystemGroups : WorldBound
     {
-        static readonly Dictionary<Type, bool> _enabled = new();
-        static readonly Dictionary<Type, Type> _parents = new();
+        readonly Dictionary<Type, bool> _enabled = new();
+        readonly Dictionary<Type, Type> _parents = new();
 
-        public static void Register(Type groupType)
+        internal void Register(Type groupType)
         {
             if (!_enabled.TryAdd(groupType, true)) return;
 
@@ -21,12 +23,12 @@ namespace EOS.Systems.Groups
                 Register(baseType);
             }
         }
+        
+        public void SetEnabled(Type groupType, bool enabled) => _enabled[groupType] = enabled;
+        public void Enable<T>() where T : SystemGroup => SetEnabled(typeof(T), true);
+        public void Disable<T>() where T : SystemGroup => SetEnabled(typeof(T), false);
 
-        public static void SetEnabled(Type groupType, bool enabled) => _enabled[groupType] = enabled;
-        public static void Enable<T>() where T : SystemGroup => SetEnabled(typeof(T), true);
-        public static void Disable<T>() where T : SystemGroup => SetEnabled(typeof(T), false);
-
-        public static bool IsEnabled(Type groupType)
+        public bool IsEnabled(Type groupType)
         {
             if (!_enabled.TryGetValue(groupType, out bool enabled)) return true;
             if (!enabled) return false;
@@ -34,7 +36,7 @@ namespace EOS.Systems.Groups
             return true;
         }
 
-        public static void Clear()
+        internal void Reset()
         {
             _enabled.Clear();
             _parents.Clear();

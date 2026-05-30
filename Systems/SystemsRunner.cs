@@ -7,15 +7,18 @@ using EOS.Systems.Groups;
 
 namespace EOS.Systems
 {
-    internal static partial class SystemsRunner
+    public partial class SystemsRunner : WorldBound
     {
-        static readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _update = new();
-        static readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _fixedUpdate = new();
-        static readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _lateUpdate = new();
-        static readonly List<EosSystem> _all = new();
-
-        public static void Init()
+        readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _update = new();
+        readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _fixedUpdate = new();
+        readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _lateUpdate = new();
+        
+        readonly List<EosSystem> _all = new();
+        readonly Dictionary<Type, EosSystem> _typeToSystem = new();
+        
+        protected override void OnInited()
         {
+            _typeToSystem.Clear();
             _all.Clear();
             _update.Clear();
             _fixedUpdate.Clear();
@@ -29,6 +32,7 @@ namespace EOS.Systems
             {
                 var instance = (EosSystem)Activator.CreateInstance(type);
                 _all.Add(instance);
+                _typeToSystem[type] = instance;
                 instance.Awake();
 
                 var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -39,11 +43,11 @@ namespace EOS.Systems
 
                 var groupAttr = type.GetCustomAttribute<GroupAttribute>();
                 Func<bool> isUpdate = groupAttr != null
-                    ? () => instance.IsUpdate() && SystemGroups.IsEnabled(groupAttr.Group)
+                    ? () => instance.IsUpdate() && World.SystemGroups.IsEnabled(groupAttr.Group)
                     : instance.IsUpdate;
 
                 if (groupAttr != null)
-                    SystemGroups.Register(groupAttr.Group);
+                    World.SystemGroups.Register(groupAttr.Group);
 
                 foreach (var method in methods)
                 {
@@ -66,11 +70,11 @@ namespace EOS.Systems
                 system.Start();
         }
 
-        public static void Update(float deltaTime) => Run(_update, deltaTime);
-        public static void FixedUpdate(float deltaTime) => Run(_fixedUpdate, deltaTime);
-        public static void LateUpdate(float deltaTime) => Run(_lateUpdate, deltaTime);
+        internal void Update(float deltaTime) => Run(_update, deltaTime);
+        internal void FixedUpdate(float deltaTime) => Run(_fixedUpdate, deltaTime);
+        internal void LateUpdate(float deltaTime) => Run(_lateUpdate, deltaTime);
 
-        static void Run(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems, float deltaTime)
+        void Run(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems, float deltaTime)
         {
             for (int i = 0; i < systems.Count; i++)
             {
@@ -78,8 +82,7 @@ namespace EOS.Systems
                 if (s.isUpdate()) s.action(deltaTime);
             }
         }
-
-        static void TopologicalSort(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems)
+        void TopologicalSort(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems)
         {
             int n = systems.Count;
             var typeToIndices = new Dictionary<Type, List<int>>(n);
@@ -141,5 +144,8 @@ namespace EOS.Systems
             systems.Clear();
             systems.AddRange(result);
         }
+        
+        public T GetSystem<T>() where T : EosSystem => _typeToSystem.TryGetValue(typeof(T), out var system) ? (T)system : null;
+        public IEnumerable<EosSystem> All => _all;
     }
 }

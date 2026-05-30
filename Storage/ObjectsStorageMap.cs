@@ -1,21 +1,24 @@
 using System;
 using System.Collections.Generic;
+
+using EOS.Core;
 using EOS.Entities;
 using EOS.Objects;
 
 namespace EOS.Storage
 {
-    internal static class StorageMap
+    public class ObjectsStorageMap : WorldBound
     {
-        static readonly Dictionary<Type, IStorage> _map = new();
-        static readonly Dictionary<Type, List<IStorage>> _byInterface = new();
+        readonly Dictionary<Type, IStorage> _map = new();
+        readonly Dictionary<Type, List<IStorage>> _byInterface = new();
 
-        public static Storage<T> Get<T>() where T : EosObject, new()
+        public Storage<T> Get<T>() where T : EosObject, new()
         {
             if (_map.TryGetValue(typeof(T), out var existing))
                 return (Storage<T>)existing;
 
             var created = new Storage<T>();
+            created.Init(World);
             _map.Add(typeof(T), created);
 
             foreach (var iface in typeof(T).GetInterfaces())
@@ -30,26 +33,23 @@ namespace EOS.Storage
 
             return created;
         }
-
-        public static IStorage GetConcrete(Type type)
+        public IStorage GetConcrete(Type type)
         {
             _map.TryGetValue(type, out var storage);
             return storage;
         }
-
-        public static IReadOnlyList<IStorage> GetByInterface(Type interfaceType)
+        public IReadOnlyList<IStorage> GetByInterface(Type interfaceType)
         {
             _byInterface.TryGetValue(interfaceType, out var result);
             return result;
         }
 
-        public static void DestroyEntity(EosEntity entity)
+        internal void DestroyEntity(EosEntity entity)
         {
             foreach (var storage in _map.Values)
                 storage.RemoveEntity(entity);
         }
-
-        public static void Clear()
+        internal void Reset()
         {
             foreach (var storage in _map.Values)
                 storage.Clear();

@@ -1,38 +1,39 @@
 using System;
 using System.Collections.Generic;
 
+using EOS.Core;
 using EOS.Storage;
 
 namespace EOS.Entities
 {
-    internal static class EntitiesContainer
+    public class EntitiesContainer : WorldBound
     {
-        static int _next;
-        static readonly Stack<int> _free = new();
-        static readonly Dictionary<int, string> _names = new();
-        static readonly Dictionary<int, ushort> _versions = new();
-        static readonly Dictionary<int, bool> _actives = new();
-        static readonly List<int> _alive = new();
-        static readonly Dictionary<int, int> _aliveIndex = new();
+        int _next;
+        readonly Stack<int> _free = new();
+        readonly Dictionary<int, string> _names = new();
+        readonly Dictionary<int, ushort> _versions = new();
+        readonly Dictionary<int, bool> _actives = new();
+        readonly List<int> _alive = new();
+        readonly Dictionary<int, int> _aliveIndex = new();
 
-        public static IEnumerable<EosEntity> All()
+        public IEnumerable<EosEntity> All()
         {
             for (int i = 0; i < _alive.Count; i++)
             {
                 int id = _alive[i];
-                yield return new EosEntity(id, _versions[id], _names.GetValueOrDefault(id, string.Empty));
+                yield return new EosEntity(id, _versions[id], World, _names.GetValueOrDefault(id, string.Empty));
             }
         }
-        public static void ForEach(Action<EosEntity> action)
+        public void ForEach(Action<EosEntity> action)
         {
             for (int i = 0; i < _alive.Count; i++)
             {
                 int id = _alive[i];
-                action(new EosEntity(id, _versions[id], _names.GetValueOrDefault(id, string.Empty)));
+                action(new EosEntity(id, _versions[id], World, _names.GetValueOrDefault(id, string.Empty)));
             }
         }
 
-        public static (int Id, ushort Version, string Name) Create(string name, bool active)
+        internal (int Id, ushort Version, string Name) Create(string name, bool active)
         {
             int id = _free.Count > 0 ? _free.Pop() : _next++;
 
@@ -45,20 +46,20 @@ namespace EOS.Entities
             return (id, _versions[id], name);
         }
 
-        public static bool IsValid(EosEntity entity)
+        public bool IsValid(EosEntity entity)
         {
             return entity.Id >= 0
                 && _names.ContainsKey(entity.Id)
                 && _versions.TryGetValue(entity.Id, out var version)
                 && version == entity.Version;
         }
-        public static bool IsActive(EosEntity entity)
+        public bool IsActive(EosEntity entity)
         {
             return _actives.TryGetValue(entity.Id, out var active) && active;
         }
-        public static void SetActive(EosEntity entity, bool active) => _actives[entity.Id] = active;
+        public void SetActive(EosEntity entity, bool active) => _actives[entity.Id] = active;
 
-        public static void Destroy(EosEntity entity)
+        public void Destroy(EosEntity entity)
         {
             if (!IsValid(entity)) return;
 
@@ -67,7 +68,7 @@ namespace EOS.Entities
 
             if (_aliveIndex.TryGetValue(entity.Id, out int index))
             {
-                int lastId = _alive[_alive.Count - 1];
+                int lastId = _alive[^1];
                 _alive[index] = lastId;
                 _aliveIndex[lastId] = index;
                 _alive.RemoveAt(_alive.Count - 1);
@@ -77,10 +78,10 @@ namespace EOS.Entities
             _versions[entity.Id]++;
             _free.Push(entity.Id);
 
-            StorageMap.DestroyEntity(entity);
+            World.ObjectsStorages.DestroyEntity(entity);
         }
 
-        public static void Init()
+        internal void Reset()
         {
             _next = 0;
             _free.Clear();
