@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using EOS.Entities;
@@ -15,31 +16,76 @@ namespace EOS.Systems
         const string GET_OWNER = "GetOwner";
         const string COUNT = "Count";
 
-        static Action BuildQuery(object instance, MethodInfo method, Type[] paramTypes)
+        static Action<float> BuildQuery(object instance, MethodInfo method)
         {
-            if (paramTypes.Length == 0)
+            var parameters = method.GetParameters();
+            var componentTypes = new List<Type>();
+            
+            int entityParamIndex = -1;
+            int deltaTimeParamIndex = -1;
+
+            foreach (var p in parameters)
             {
-                return () => method.Invoke(instance, null);
+                if (typeof(EosObject).IsAssignableFrom(p.ParameterType))
+                {
+                    componentTypes.Add(p.ParameterType);
+                }
+                else if (p.ParameterType == typeof(EosEntity))
+                {
+                    entityParamIndex = p.Position;
+                }
+                else if (p.ParameterType == typeof(float))
+                {
+                    deltaTimeParamIndex = p.Position;
+                }
+                else
+                {
+                    throw new Exception($"Unsupported parameter type {p.ParameterType.Name} in {method.Name}");
+                }
             }
 
-            var storages = paramTypes.Select(GetStorage).ToArray();
-            
+            var excludeTypes = new List<Type>();
+            foreach (var attr in method.GetCustomAttributes<ExcludeAttribute>(true))
+                excludeTypes.AddRange(attr.Types);
+
+            var includeTypes = new List<Type>();
+            foreach (var attr in method.GetCustomAttributes<IncludeAttribute>(true))
+                includeTypes.AddRange(attr.Types);
+
+            if (componentTypes.Count == 0)
+            {
+                return (deltaTime) =>
+                {
+                    var args = new object[parameters.Length];
+                    if (entityParamIndex != -1) args[entityParamIndex] = EosEntity.Null;
+                    if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+                    method.Invoke(instance, args);
+                };
+            }
+
+            var storages = componentTypes.Select(GetStorage).ToArray();
             var getMethods = storages.Select(s => GetMethod(s, GET)).ToArray();
             var hasMethods = storages.Select(s => GetMethod(s, HAS)).ToArray();
             var getOwnerMethods = storages.Select(s => GetMethod(s, GET_OWNER)).ToArray();
             var countProps = storages.Select(s => GetProp(s, COUNT)).ToArray();
 
-            return () =>
+            var includeStorages = includeTypes.Select(GetStorage).ToArray();
+            var includeHasMethods = includeStorages.Select(s => GetMethod(s, HAS)).ToArray();
+
+            var excludeStorages = excludeTypes.Select(GetStorage).ToArray();
+            var excludeHasMethods = excludeStorages.Select(s => GetMethod(s, HAS)).ToArray();
+
+            return (deltaTime) =>
             {
                 int pivot = 0;
                 int min = (int)countProps[0].GetValue(storages[0]);
                 for (int j = 1; j < countProps.Length; j++)
                 {
                     int c = (int)countProps[j].GetValue(storages[j]);
-                    if (c < min) 
-                    { 
-                        min = c; 
-                        pivot = j; 
+                    if (c < min)
+                    {
+                        min = c;
+                        pivot = j;
                     }
                 }
 
@@ -57,17 +103,47 @@ namespace EOS.Systems
                             break;
                         }
                     }
+                    if (!valid) continue;
 
-                    if (valid)
+                    for (int j = 0; j < includeHasMethods.Length; j++)
                     {
-                        var args = new object[paramTypes.Length];
-                        for (int j = 0; j < paramTypes.Length; j++)
+                        if (!(bool)includeHasMethods[j].Invoke(includeStorages[j], new object[] { entity }))
                         {
-                            args[j] = getMethods[j].Invoke(storages[j], new object[] { entity });
+                            valid = false;
+                            break;
                         }
-                        
-                        method.Invoke(instance, args);
                     }
+                    if (!valid) continue;
+
+                    for (int j = 0; j < excludeHasMethods.Length; j++)
+                    {
+                        if ((bool)excludeHasMethods[j].Invoke(excludeStorages[j], new object[] { entity }))
+                        {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    if (!valid) continue;
+
+                    var args = new object[parameters.Length];
+                    int compIdx = 0;
+                    for (int j = 0; j < parameters.Length; j++)
+                    {
+                        if (typeof(EosObject).IsAssignableFrom(parameters[j].ParameterType))
+                        {
+                            args[j] = getMethods[compIdx].Invoke(storages[compIdx], new object[] { entity });
+                            compIdx++;
+                        }
+                        else if (parameters[j].ParameterType == typeof(EosEntity))
+                        {
+                            args[j] = entity;
+                        }
+                        else if (parameters[j].ParameterType == typeof(float))
+                        {
+                            args[j] = deltaTime;
+                        }
+                    }
+                    method.Invoke(instance, args);
                 }
             };
         }
@@ -77,7 +153,6 @@ namespace EOS.Systems
             var method = typeof(StorageMap)
                 .GetMethod(nameof(StorageMap.Get), BindingFlags.Static | BindingFlags.Public)
                 ?? throw new Exception("StorageMap.Get<T>() not found");
-            
             return method.MakeGenericMethod(componentType).Invoke(null, null);
         }
 

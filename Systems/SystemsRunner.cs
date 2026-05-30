@@ -1,10 +1,7 @@
-// Systems/SystemsRunner.cs
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-
 using EOS.Core;
 using EOS.Systems.Groups;
 
@@ -12,9 +9,9 @@ namespace EOS.Systems
 {
     internal static partial class SystemsRunner
     {
-        static readonly List<(Action action, Func<bool> isUpdate, Type type)> _update = new();
-        static readonly List<(Action action, Func<bool> isUpdate, Type type)> _fixedUpdate = new();
-        static readonly List<(Action action, Func<bool> isUpdate, Type type)> _lateUpdate = new();
+        static readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _update = new();
+        static readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _fixedUpdate = new();
+        static readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _lateUpdate = new();
         static readonly List<EosSystem> _all = new();
 
         public static void Init()
@@ -34,26 +31,30 @@ namespace EOS.Systems
                 _all.Add(instance);
                 instance.Awake();
 
-                var method = type.GetMethod(
-                    EXECUTE_METHOD,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    ?? throw new Exception($"{type.Name} must have an Execute method");
+                var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Where(m => m.Name == EXECUTE_METHOD);
 
-                var paramTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();
-                var action = BuildQuery(instance, method, paramTypes);
+                if (!methods.Any())
+                    throw new Exception($"{type.Name} must have at least one Execute method");
+
                 var groupAttr = type.GetCustomAttribute<GroupAttribute>();
-                
                 Func<bool> isUpdate = groupAttr != null
                     ? () => instance.IsUpdate() && SystemGroups.IsEnabled(groupAttr.Group)
                     : instance.IsUpdate;
+
                 if (groupAttr != null)
                     SystemGroups.Register(groupAttr.Group);
 
-                switch (instance.UpdateType)
+                foreach (var method in methods)
                 {
-                    case UpdateType.Update: _update.Add((action, isUpdate, type)); break;
-                    case UpdateType.FixedUpdate: _fixedUpdate.Add((action, isUpdate, type)); break;
-                    case UpdateType.LateUpdate: _lateUpdate.Add((action, isUpdate, type)); break;
+                    var action = BuildQuery(instance, method);
+
+                    switch (instance.UpdateType)
+                    {
+                        case UpdateType.Update: _update.Add((action, isUpdate, type)); break;
+                        case UpdateType.FixedUpdate: _fixedUpdate.Add((action, isUpdate, type)); break;
+                        case UpdateType.LateUpdate: _lateUpdate.Add((action, isUpdate, type)); break;
+                    }
                 }
             }
 
@@ -65,26 +66,32 @@ namespace EOS.Systems
                 system.Start();
         }
 
-        public static void Update() => Run(_update);
-        public static void FixedUpdate() => Run(_fixedUpdate);
-        public static void LateUpdate() => Run(_lateUpdate);
+        public static void Update(float deltaTime) => Run(_update, deltaTime);
+        public static void FixedUpdate(float deltaTime) => Run(_fixedUpdate, deltaTime);
+        public static void LateUpdate(float deltaTime) => Run(_lateUpdate, deltaTime);
 
-        static void Run(List<(Action action, Func<bool> isUpdate, Type type)> systems)
+        static void Run(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems, float deltaTime)
         {
             for (int i = 0; i < systems.Count; i++)
             {
                 var s = systems[i];
-                if (s.isUpdate()) s.action();
+                if (s.isUpdate()) s.action(deltaTime);
             }
         }
 
-        static void TopologicalSort(List<(Action action, Func<bool> isUpdate, Type type)> systems)
+        static void TopologicalSort(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems)
         {
             int n = systems.Count;
-
-            var typeToIdx = new Dictionary<Type, int>(n);
+            var typeToIndices = new Dictionary<Type, List<int>>(n);
             for (int i = 0; i < n; i++)
-                typeToIdx[systems[i].type] = i;
+            {
+                if (!typeToIndices.TryGetValue(systems[i].type, out var list))
+                {
+                    list = new List<int>();
+                    typeToIndices[systems[i].type] = list;
+                }
+                list.Add(i);
+            }
 
             var adj = new List<int>[n];
             var inDegree = new int[n];
@@ -94,19 +101,24 @@ namespace EOS.Systems
             for (int i = 0; i < n; i++)
             {
                 var type = systems[i].type;
-
                 foreach (var attr in type.GetCustomAttributes<UpdateAfterAttribute>())
-                    if (typeToIdx.TryGetValue(attr.Target, out int j))
+                    if (typeToIndices.TryGetValue(attr.Target, out var targets))
                     {
-                        adj[j].Add(i);
-                        inDegree[i]++;
+                        foreach (int j in targets)
+                        {
+                            adj[j].Add(i);
+                            inDegree[i]++;
+                        }
                     }
 
                 foreach (var attr in type.GetCustomAttributes<UpdateBeforeAttribute>())
-                    if (typeToIdx.TryGetValue(attr.Target, out int j))
+                    if (typeToIndices.TryGetValue(attr.Target, out var targets))
                     {
-                        adj[i].Add(j);
-                        inDegree[j]++;
+                        foreach (int j in targets)
+                        {
+                            adj[i].Add(j);
+                            inDegree[j]++;
+                        }
                     }
             }
 
@@ -114,7 +126,7 @@ namespace EOS.Systems
             for (int i = 0; i < n; i++)
                 if (inDegree[i] == 0) queue.Enqueue(i);
 
-            var result = new List<(Action, Func<bool>, Type)>(n);
+            var result = new List<(Action<float>, Func<bool>, Type)>(n);
             while (queue.Count > 0)
             {
                 int cur = queue.Dequeue();
