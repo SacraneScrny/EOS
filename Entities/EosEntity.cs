@@ -11,7 +11,7 @@ namespace EOS.Entities
         public readonly int Id;
         public readonly ushort Version;
         public readonly string Name;
-        public readonly World World;
+        internal readonly World World;
 
         public bool IsValid => World != null && World.Entities.IsValid(this);
         public bool IsActive => World != null && World.Entities.IsActive(this);

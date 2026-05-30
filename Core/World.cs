@@ -9,10 +9,38 @@ using EOS.Systems.Groups;
 
 namespace EOS.Core
 {
-    public class World : IDisposable
+    public interface IReadOnlyWorld
     {
+        bool IsDisposed { get; }
+        bool IsEnabled { get; }
+        bool IsManualUpdate { get; }
+        
+        EntitiesContainer Entities { get; }
+        ObjectsContainer Objects { get; }
+        SystemsRunner Systems { get; }
+        
+        ObjectsStorageMap ObjectsStorages { get; }
+        SystemGroups SystemGroups { get; }
+        InitializeSystemRunner InitializeSystems { get; }
+        
+        IReadOnlyEntityCommandBuffer BeforeAll { get; }
+        IReadOnlyEntityCommandBuffer BeforeUpdate { get; }
+        IReadOnlyEntityCommandBuffer AfterUpdate { get; }
+        IReadOnlyEntityCommandBuffer BeforeFixedUpdate { get; }
+        IReadOnlyEntityCommandBuffer AfterFixedUpdate { get; }
+        IReadOnlyEntityCommandBuffer BeforeLateUpdate { get; }
+        IReadOnlyEntityCommandBuffer AfterLateUpdate { get; }
+        IReadOnlyEntityCommandBuffer AfterAll { get; }
+    }
+    
+    public class World : IDisposable, IReadOnlyWorld, IEquatable<World>
+    {
+        public int Id { get; private set; } = -1;
+        internal void SetId(int id) => Id = id;
+        
         public bool IsDisposed { get; private set; }
         public bool IsEnabled { get; private set; }
+        public bool IsManualUpdate { get; set; }
         
         public EntitiesContainer Entities { get; } = new();
         public ObjectsContainer Objects { get; } = new();
@@ -50,6 +78,7 @@ namespace EOS.Core
 
         public void Reset()
         {
+            if (IsDisposed) return;
             IsEnabled = false;
             _beforeAll.Clear();
             _beforeUpdate.Clear();
@@ -67,6 +96,7 @@ namespace EOS.Core
         }
         public void Init()
         {
+            if (IsDisposed) return;
             _beforeAll = new(this);
             _beforeUpdate = new(this);
             _afterUpdate = new(this);
@@ -88,6 +118,7 @@ namespace EOS.Core
         
         public void Update(float deltaTime)
         {
+            if (IsDisposed) return;
             if (!IsEnabled) return;
             _beforeAll.Execute();
             _beforeUpdate.Execute();
@@ -98,6 +129,7 @@ namespace EOS.Core
         }
         public void FixedUpdate(float deltaTime)
         {
+            if (IsDisposed) return;
             if (!IsEnabled) return;
             _beforeFixedUpdate.Execute();
             Systems.FixedUpdate(deltaTime);
@@ -106,6 +138,7 @@ namespace EOS.Core
         }
         public void LateUpdate(float deltaTime)
         {
+            if (IsDisposed) return;
             if (!IsEnabled) return;
             _beforeLateUpdate.Execute();
             Systems.LateUpdate(deltaTime);
@@ -119,5 +152,20 @@ namespace EOS.Core
             if (IsDisposed) return;
             IsDisposed = true;
         }
+        
+        public bool Equals(World other)
+        {
+            if (other is null) return false;
+            if (ReferenceEquals(this, other)) return true;
+            return Id == other.Id;
+        }
+        public override bool Equals(object obj)
+        {
+            if (obj is null) return false;
+            if (ReferenceEquals(this, obj)) return true;
+            if (obj.GetType() != GetType()) return false;
+            return Equals((World)obj);
+        }
+        public override int GetHashCode() => Id;
     }
 }
