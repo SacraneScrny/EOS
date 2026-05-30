@@ -19,17 +19,15 @@ namespace EOS.Systems
         static Action<float> BuildQuery(object instance, MethodInfo method)
         {
             var parameters = method.GetParameters();
-            var componentTypes = new List<Type>();
             int entityParamIndex = -1;
             int deltaTimeParamIndex = -1;
-            
+
+            var concreteParams = new List<(int position, Type type)>();
+            var interfaceParams = new List<(int position, Type type)>();
+
             foreach (var p in parameters)
             {
-                if (typeof(EosObject).IsAssignableFrom(p.ParameterType))
-                {
-                    componentTypes.Add(p.ParameterType);
-                }
-                else if (p.ParameterType == typeof(EosEntity))
+                if (p.ParameterType == typeof(EosEntity))
                 {
                     entityParamIndex = p.Position;
                 }
@@ -37,154 +35,253 @@ namespace EOS.Systems
                 {
                     deltaTimeParamIndex = p.Position;
                 }
+                else if (p.ParameterType.IsInterface)
+                {
+                    interfaceParams.Add((p.Position, p.ParameterType));
+                }
+                else if (typeof(EosObject).IsAssignableFrom(p.ParameterType))
+                {
+                    concreteParams.Add((p.Position, p.ParameterType));
+                }
                 else
                 {
                     throw new Exception($"Unsupported parameter type {p.ParameterType.Name} in {method.Name}");
                 }
             }
-            
+
             var excludeTypes = new List<Type>();
             foreach (var attr in method.GetCustomAttributes<ExcludeAttribute>(true))
                 excludeTypes.AddRange(attr.Types);
-                
+
             var includeTypes = new List<Type>();
             foreach (var attr in method.GetCustomAttributes<IncludeAttribute>(true))
                 includeTypes.AddRange(attr.Types);
 
-            var includeStorages = includeTypes.Select(GetStorage).ToArray();
+            var includeStorages = includeTypes.Select(ResolveConcreteStorage).ToArray();
+            var excludeStorages = excludeTypes.Select(ResolveConcreteStorage).ToArray();
             var includeHasMethods = includeStorages.Select(s => GetMethod(s, HAS)).ToArray();
-            var excludeStorages = excludeTypes.Select(GetStorage).ToArray();
             var excludeHasMethods = excludeStorages.Select(s => GetMethod(s, HAS)).ToArray();
 
-            if (componentTypes.Count == 0)
+            var concreteStorages = concreteParams.Select(p => ResolveConcreteStorage(p.type)).ToArray();
+            var concreteGetMethods = concreteStorages.Select(s => GetMethod(s, GET)).ToArray();
+            var concreteHasMethods = concreteStorages.Select(s => GetMethod(s, HAS)).ToArray();
+            var concreteGetOwners = concreteStorages.Select(s => GetMethod(s, GET_OWNER)).ToArray();
+            var concreteCountProps = concreteStorages.Select(s => GetProp(s, COUNT)).ToArray();
+            var concreteIndexed = concreteStorages.Select(s => s as IIndexedStorage).ToArray();
+
+            if (concreteParams.Count == 0)
             {
-                if (entityParamIndex == -1)
-                {
-                    return (deltaTime) =>
-                    {
-                        var args = new object[parameters.Length];
-                        if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
-                        method.Invoke(instance, args);
-                    };
-                }
-                else
-                {
-                    return (deltaTime) =>
-                    {
-                        var args = new object[parameters.Length];
-                        if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
-                        
-                        foreach (var entity in EntitiesContainer.All())
-                        {
-                            bool valid = true;
-                            
-                            for (int j = 0; j < includeHasMethods.Length; j++)
-                            {
-                                if (!(bool)includeHasMethods[j].Invoke(includeStorages[j], new object[] { entity }))
-                                {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            if (!valid) continue;
-                            
-                            for (int j = 0; j < excludeHasMethods.Length; j++)
-                            {
-                                if ((bool)excludeHasMethods[j].Invoke(excludeStorages[j], new object[] { entity }))
-                                {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            if (!valid) continue;
+                if (interfaceParams.Count == 0)
+                    return BuildNoComponentQuery(instance, method, parameters,
+                        entityParamIndex, deltaTimeParamIndex,
+                        includeStorages, includeHasMethods,
+                        excludeStorages, excludeHasMethods);
 
-                            args[entityParamIndex] = entity;
-                            method.Invoke(instance, args);
-                        }
-                    };
-                }
+                return BuildInterfaceOnlyQuery(instance, method, parameters,
+                    interfaceParams, entityParamIndex, deltaTimeParamIndex,
+                    includeStorages, includeHasMethods,
+                    excludeStorages, excludeHasMethods);
             }
-
-            var storages = componentTypes.Select(GetStorage).ToArray();
-            var getMethods = storages.Select(s => GetMethod(s, GET)).ToArray();
-            var hasMethods = storages.Select(s => GetMethod(s, HAS)).ToArray();
-            var getOwnerMethods = storages.Select(s => GetMethod(s, GET_OWNER)).ToArray();
-            var countProps = storages.Select(s => GetProp(s, COUNT)).ToArray();
 
             return (deltaTime) =>
             {
                 int pivot = 0;
-                int min = (int)countProps[0].GetValue(storages[0]);
-                for (int j = 1; j < countProps.Length; j++)
+                int min = (int)concreteCountProps[0].GetValue(concreteStorages[0]);
+                for (int j = 1; j < concreteCountProps.Length; j++)
                 {
-                    int c = (int)countProps[j].GetValue(storages[j]);
-                    if (c < min)
-                    {
-                        min = c;
-                        pivot = j;
-                    }
+                    int c = (int)concreteCountProps[j].GetValue(concreteStorages[j]);
+                    if (c < min) { min = c; pivot = j; }
                 }
-                
+
                 for (int i = 0; i < min; i++)
                 {
-                    var entity = (EosEntity)getOwnerMethods[pivot].Invoke(storages[pivot], new object[] { i });
+                    var entity = (EosEntity)concreteGetOwners[pivot].Invoke(concreteStorages[pivot], new object[] { i });
+
+                    if (!CheckFilters(entity,
+                        concreteStorages, concreteHasMethods, pivot,
+                        includeStorages, includeHasMethods,
+                        excludeStorages, excludeHasMethods)) continue;
+
+                    var ifaceComponents = new object[interfaceParams.Count];
                     bool valid = true;
-                    
-                    for (int j = 0; j < hasMethods.Length; j++)
+                    for (int j = 0; j < interfaceParams.Count; j++)
                     {
-                        if (j == pivot) continue;
-                        if (!(bool)hasMethods[j].Invoke(storages[j], new object[] { entity }))
-                        {
-                            valid = false;
-                            break;
-                        }
+                        var component = FindInterfaceComponent(entity, interfaceParams[j].type);
+                        if (component == null) { valid = false; break; }
+                        ifaceComponents[j] = component;
                     }
                     if (!valid) continue;
-                    
-                    for (int j = 0; j < includeHasMethods.Length; j++)
-                    {
-                        if (!(bool)includeHasMethods[j].Invoke(includeStorages[j], new object[] { entity }))
-                        {
-                            valid = false;
-                            break;
-                        }
-                    }
-                    if (!valid) continue;
-                    
-                    for (int j = 0; j < excludeHasMethods.Length; j++)
-                    {
-                        if ((bool)excludeHasMethods[j].Invoke(excludeStorages[j], new object[] { entity }))
-                        {
-                            valid = false;
-                            break;
-                        }
-                    }
-                    if (!valid) continue;
-                    
+
                     var args = new object[parameters.Length];
+                    if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+                    if (entityParamIndex != -1) args[entityParamIndex] = entity;
+
                     int compIdx = 0;
                     for (int j = 0; j < parameters.Length; j++)
                     {
-                        if (typeof(EosObject).IsAssignableFrom(parameters[j].ParameterType))
+                        var pType = parameters[j].ParameterType;
+                        if (typeof(EosObject).IsAssignableFrom(pType))
                         {
-                            args[j] = getMethods[compIdx].Invoke(storages[compIdx], new object[] { entity });
+                            if (compIdx == pivot)
+                                args[j] = concreteIndexed[pivot].GetAt(i);
+                            else
+                                args[j] = concreteGetMethods[compIdx].Invoke(concreteStorages[compIdx], new object[] { entity });
                             compIdx++;
                         }
-                        else if (parameters[j].ParameterType == typeof(EosEntity))
-                        {
-                            args[j] = entity;
-                        }
-                        else if (parameters[j].ParameterType == typeof(float))
-                        {
-                            args[j] = deltaTime;
-                        }
                     }
+
+                    int ifaceIdx = 0;
+                    for (int j = 0; j < parameters.Length; j++)
+                    {
+                        if (parameters[j].ParameterType.IsInterface)
+                            args[j] = ifaceComponents[ifaceIdx++];
+                    }
+
                     method.Invoke(instance, args);
                 }
             };
         }
 
-        static object GetStorage(Type componentType)
+        static Action<float> BuildNoComponentQuery(
+            object instance, MethodInfo method, ParameterInfo[] parameters,
+            int entityParamIndex, int deltaTimeParamIndex,
+            object[] includeStorages, MethodInfo[] includeHasMethods,
+            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+        {
+            if (entityParamIndex == -1)
+            {
+                return (deltaTime) =>
+                {
+                    var args = new object[parameters.Length];
+                    if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+                    method.Invoke(instance, args);
+                };
+            }
+
+            return (deltaTime) =>
+            {
+                var args = new object[parameters.Length];
+                if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+
+                foreach (var entity in EntitiesContainer.All())
+                {
+                    if (!CheckIncludeExclude(entity,
+                        includeStorages, includeHasMethods,
+                        excludeStorages, excludeHasMethods)) continue;
+
+                    args[entityParamIndex] = entity;
+                    method.Invoke(instance, args);
+                }
+            };
+        }
+
+        static Action<float> BuildInterfaceOnlyQuery(
+            object instance, MethodInfo method, ParameterInfo[] parameters,
+            List<(int position, Type type)> interfaceParams,
+            int entityParamIndex, int deltaTimeParamIndex,
+            object[] includeStorages, MethodInfo[] includeHasMethods,
+            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+        {
+            var pivotIfaceType = interfaceParams[0].type;
+
+            return (deltaTime) =>
+            {
+                var pivotStorages = StorageMap.GetByInterface(pivotIfaceType);
+                if (pivotStorages == null) return;
+
+                foreach (var storage in pivotStorages)
+                {
+                    var indexed = storage as IIndexedStorage;
+                    if (indexed == null) continue;
+                    int count = indexed.Count;
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        var entity = indexed.GetOwner(i);
+
+                        if (!CheckIncludeExclude(entity,
+                            includeStorages, includeHasMethods,
+                            excludeStorages, excludeHasMethods)) continue;
+
+                        var ifaceComponents = new object[interfaceParams.Count];
+                        bool valid = true;
+
+                        ifaceComponents[0] = indexed.GetAt(i);
+
+                        for (int j = 1; j < interfaceParams.Count; j++)
+                        {
+                            var component = FindInterfaceComponent(entity, interfaceParams[j].type);
+                            if (component == null) { valid = false; break; }
+                            ifaceComponents[j] = component;
+                        }
+                        if (!valid) continue;
+
+                        var args = new object[parameters.Length];
+                        if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+                        if (entityParamIndex != -1) args[entityParamIndex] = entity;
+
+                        int ifaceIdx = 0;
+                        for (int j = 0; j < parameters.Length; j++)
+                        {
+                            if (parameters[j].ParameterType.IsInterface)
+                                args[j] = ifaceComponents[ifaceIdx++];
+                        }
+
+                        method.Invoke(instance, args);
+                    }
+                }
+            };
+        }
+
+        static object FindInterfaceComponent(EosEntity entity, Type interfaceType)
+        {
+            var storages = StorageMap.GetByInterface(interfaceType);
+            if (storages == null) return null;
+
+            foreach (var storage in storages)
+            {
+                var indexed = storage as IIndexedStorage;
+                if (indexed == null) continue;
+                var component = indexed.TryGetObject(entity);
+                if (component != null) return component;
+            }
+            return null;
+        }
+
+        static bool CheckFilters(
+            EosEntity entity,
+            object[] concreteStorages, MethodInfo[] concreteHasMethods, int pivot,
+            object[] includeStorages, MethodInfo[] includeHasMethods,
+            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+        {
+            for (int j = 0; j < concreteHasMethods.Length; j++)
+            {
+                if (j == pivot) continue;
+                if (!(bool)concreteHasMethods[j].Invoke(concreteStorages[j], new object[] { entity }))
+                    return false;
+            }
+            return CheckIncludeExclude(entity,
+                includeStorages, includeHasMethods,
+                excludeStorages, excludeHasMethods);
+        }
+
+        static bool CheckIncludeExclude(
+            EosEntity entity,
+            object[] includeStorages, MethodInfo[] includeHasMethods,
+            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+        {
+            for (int j = 0; j < includeHasMethods.Length; j++)
+                if (!(bool)includeHasMethods[j].Invoke(includeStorages[j], new object[] { entity }))
+                    return false;
+
+            for (int j = 0; j < excludeHasMethods.Length; j++)
+                if ((bool)excludeHasMethods[j].Invoke(excludeStorages[j], new object[] { entity }))
+                    return false;
+
+            return true;
+        }
+
+        static object ResolveConcreteStorage(Type componentType)
         {
             var method = typeof(StorageMap)
                 .GetMethod(nameof(StorageMap.Get), BindingFlags.Static | BindingFlags.Public)

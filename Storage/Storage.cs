@@ -6,7 +6,7 @@ using EOS.Objects;
 
 namespace EOS.Storage
 {
-    public class Storage<T> : IStorage
+    public class Storage<T> : IStorage, IIndexedStorage
         where T : EosObject, new()
     {
         T[] _data = new T[1024];
@@ -88,5 +88,12 @@ namespace EOS.Storage
             _index.Clear();
             Count = 0;
         }
+        
+        object IIndexedStorage.GetAt(int index) => _data[index];
+        object IIndexedStorage.TryGetObject(EosEntity entity)
+            => TryGet(entity, out var result) ? result : null;
+    
+        EosEntity IIndexedStorage.GetOwner(int index) => GetOwner(index);
+        int IIndexedStorage.Count => Count;
     }
 }
