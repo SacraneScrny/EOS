@@ -29,6 +29,7 @@ namespace EOS.Storage
         {
             foreach (var storage in _map.Values)
                 storage.Clear();
+            _map.Clear();
         }
     }
 }

@@ -36,16 +36,14 @@ namespace EOS.Systems.CommandBuffer
         public BoundSchedule Destroy()
             => Wrap(_chain.Destroy());
 
-        // вклеить кешированный чейн в текущий батч
         public BoundSchedule Apply(CommandChain chain)
         {
             _chain.Ops.AddRange(chain.Ops);
             return this;
         }
 
-        // переключиться на другую сущность
-        public BoundSchedule Schedule(EosEntity entity)
-            => _ecb.Schedule(entity);
+        public BoundSchedule Schedule(EosEntity entity) => _ecb.Schedule(entity);
+        public BoundSchedule Schedule(DeferredEntity deferred) => _ecb.Schedule(deferred);
 
         BoundSchedule Wrap(CommandChain _) => this;
     }
