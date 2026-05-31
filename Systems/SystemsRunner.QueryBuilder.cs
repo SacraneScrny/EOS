@@ -162,10 +162,11 @@ namespace EOS.Systems
 
                     for (int r = 0; r < recent.Count; r++)
                     {
-                        int i = recent[r];
+                        var entity = recent[r];
+                        int i = pivotIndexed.IndexOf(entity);
+                        if (i < 0) continue;
                         if (!pivotIndexed.IsReady(i)) continue;
 
-                        var entity = pivotIndexed.GetOwner(i);
                         bool valid = true;
 
                         for (int j = 0; j < concreteParams.Count; j++)
@@ -175,28 +176,20 @@ namespace EOS.Systems
                             {
                                 if (concreteParams[j].optional)
                                 {
-                                    // optional+onlyNew — если есть, должен быть новым
                                     var comp = concreteIndexed[j].TryGetObject(entity);
-                                    if (comp != null)
-                                    {
-                                        int idx = GetIndexOf(concreteIndexed[j], entity);
-                                        if (idx < 0 || !concreteIndexed[j].RecentlyAdded.Contains(idx))
-                                        { valid = false; break; }
-                                    }
+                                    if (comp != null && !concreteIndexed[j].IsRecent(entity))
+                                    { valid = false; break; }
                                 }
                                 else
                                 {
-                                    // обязательный onlyNew — должен быть и быть новым
                                     var comp = concreteIndexed[j].TryGetObject(entity);
                                     if (comp == null) { valid = false; break; }
-                                    int idx = GetIndexOf(concreteIndexed[j], entity);
-                                    if (idx < 0 || !concreteIndexed[j].RecentlyAdded.Contains(idx))
+                                    if (!concreteIndexed[j].IsRecent(entity))
                                     { valid = false; break; }
                                 }
                             }
                             else if (!concreteOptional[j])
                             {
-                                // обычный обязательный
                                 if (!(bool)concreteHasMethods[j].Invoke(concreteStorages[j], new object[] { entity }))
                                 { valid = false; break; }
                             }
@@ -231,10 +224,11 @@ namespace EOS.Systems
 
                         for (int r = 0; r < recent.Count; r++)
                         {
-                            int idx = recent[r];
+                            var entity = recent[r];
+                            int idx = indexed.IndexOf(entity);
+                            if (idx < 0) continue;
                             if (!indexed.IsReady(idx)) continue;
 
-                            var entity = indexed.GetOwner(idx);
                             bool valid = true;
 
                             for (int j = 0; j < concreteParams.Count; j++)
@@ -378,11 +372,7 @@ namespace EOS.Systems
                         var component = indexed.TryGetObject(entity);
                         if (component == null) continue;
 
-                        if (onlyNew)
-                        {
-                            int idx = GetIndexOf(indexed, entity);
-                            if (idx < 0 || !indexed.RecentlyAdded.Contains(idx)) continue;
-                        }
+                        if (onlyNew && !indexed.IsRecent(entity)) continue;
 
                         found = component;
                         break;
@@ -408,13 +398,6 @@ namespace EOS.Systems
                 if (component != null) return component;
             }
             return null;
-        }
-
-        static int GetIndexOf(IIndexedStorage indexed, EosEntity entity)
-        {
-            for (int i = 0; i < indexed.Count; i++)
-                if (indexed.GetOwner(i) == entity) return i;
-            return -1;
         }
 
         object[] BuildArgs(

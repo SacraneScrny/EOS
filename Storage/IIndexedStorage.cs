@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 using EOS.Entities;
 
@@ -12,6 +12,8 @@ namespace EOS.Storage
         object TryGetObject(EosEntity entity);
         bool IsReady(int index);
         void MarkReady(EosEntity entity);
-        IReadOnlyList<int> RecentlyAdded { get; }
+        int IndexOf(EosEntity entity);
+        bool IsRecent(EosEntity entity);
+        IReadOnlyList<EosEntity> RecentlyAdded { get; }
     }
 }

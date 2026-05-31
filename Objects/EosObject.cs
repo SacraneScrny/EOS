@@ -17,6 +17,12 @@ namespace EOS.Objects
         protected bool _enabled = true;
         public EosEntity Entity { get; private set; } = EosEntity.Null;
 
+        internal int UpdateIndex = -1;
+        internal int FixedIndex = -1;
+        internal int LateIndex = -1;
+        internal int PoolIndex = -1;
+        internal bool Initialized;
+
         internal void SetupObject(EosEntity entity)
         {
             Entity = entity;
