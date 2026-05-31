@@ -39,7 +39,7 @@ namespace EOS.Systems
             for (int i = _batch.Count - 1; i >= 0; i--)
             {
                 var obj = _batch[i];
-                if (!obj.IsAwaken) continue;
+                if (!obj.IsAwaken || obj.IsDisposed) continue;
                 try { obj.Start(); }
                 catch (Exception ex) { EosLog.Error($"{obj.GetType().Name}.Start threw: {ex.Message}", nameof(InitializeSystemRunner)); }
                 World.ObjectsStorages.MarkReady(obj);

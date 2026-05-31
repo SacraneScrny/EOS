@@ -162,6 +162,10 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             IsDisposed = true;
+            ObjectsStorages.Reset();
+            Entities.Reset();
+            Objects.Reset();
+            SystemGroups.Reset();
         }
 
         public bool Equals(World other)
