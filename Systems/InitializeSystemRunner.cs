@@ -35,6 +35,7 @@ namespace EOS.Systems
             for (int i = _batch.Count - 1; i >= 0; i--)
             {
                 var obj = _batch[i];
+                if (!obj.IsAwaken) continue;
                 obj.Start();
                 World.ObjectsStorages.MarkReady(obj);
                 World.Objects.MarkInitialized(obj);

@@ -64,7 +64,8 @@ namespace EOS.Storage
             return false;
         }
         public bool Has(EosEntity entity) => IndexOf(entity) >= 0;
-        public EosEntity GetOwner(int index) => new(_owners[index], _ownerVersions[index], World);
+        public EosEntity GetOwner(int index) =>
+            new(_owners[index], _ownerVersions[index], World, World.Entities.GetName(_owners[index]));
 
         public bool IsRecent(EosEntity entity)
         {
@@ -102,10 +103,17 @@ namespace EOS.Storage
 
         public void Clear()
         {
-            Array.Clear(_data, 0, Count);
-            Array.Clear(_owners, 0, Count);
-            Array.Clear(_ownerVersions, 0, Count);
-            Array.Clear(_addedFrame, 0, Count);
+            int count = Count;
+            for (int i = count - 1; i >= 0; i--)
+            {
+                var obj = _data[i];
+                if (obj != null && !obj.IsDisposed)
+                    obj.Dispose();
+            }
+            Array.Clear(_data, 0, count);
+            Array.Clear(_owners, 0, count);
+            Array.Clear(_ownerVersions, 0, count);
+            Array.Clear(_addedFrame, 0, count);
             Count = 0;
             _frame = 0;
             _recent.Clear();
@@ -123,6 +131,7 @@ namespace EOS.Storage
         {
             int i = IndexOf(entity);
             if (i < 0) return;
+            if (_addedFrame[i] == _frame) return;
             _addedFrame[i] = _frame;
             _recent.Add(entity);
         }

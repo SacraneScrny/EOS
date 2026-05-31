@@ -23,6 +23,11 @@ namespace EOS.Entities
             int id = _alive[index];
             return new EosEntity(id, _versions[id], World, _names[id] ?? string.Empty);
         }
+        internal string GetName(int id)
+        {
+            if (id < 0 || id >= _names.Length) return string.Empty;
+            return _names[id] ?? string.Empty;
+        }
 
         public AliveEntities All() => new(this);
         public void ForEach(Action<EosEntity> action)

@@ -27,19 +27,19 @@ namespace EOS.Objects
 
         internal void Update(float deltaTime)
         {
-            for (int i = 0; i < _updates.Count; i++)
+            for (int i = _updates.Count - 1; i >= 0; i--)
                 if (_updates[i].IsEnabled)
                     _updates[i].OnUpdate(deltaTime);
         }
         internal void FixedUpdate(float deltaTime)
         {
-            for (int i = 0; i < _fixedUpdates.Count; i++)
+            for (int i = _fixedUpdates.Count - 1; i >= 0; i--)
                 if (_fixedUpdates[i].IsEnabled)
                     _fixedUpdates[i].OnFixedUpdate(deltaTime);
         }
         internal void LateUpdate(float deltaTime)
         {
-            for (int i = 0; i < _lateUpdates.Count; i++)
+            for (int i = _lateUpdates.Count - 1; i >= 0; i--)
                 if (_lateUpdates[i].IsEnabled)
                     _lateUpdates[i].OnLateUpdate(deltaTime);
         }

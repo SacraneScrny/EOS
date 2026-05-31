@@ -17,11 +17,14 @@ namespace EOS.Core
         
         public static void Boot()
         {
+            _defaultWorld?.Dispose();
+            foreach (var w in _otherWorlds) w.Dispose();
+            _otherWorlds.Clear();
             _nextId = 0;
-            
+
             _defaultWorld = new();
             _defaultWorld.SetId(_nextId++);
-            _defaultWorld.Init();  
+            _defaultWorld.Init();
             IsEnabled = true;
         }
         public static void Reset()

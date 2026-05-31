@@ -6,6 +6,9 @@ namespace EOS.Systems
     {
         public bool IsEnabled { get; private set; } = true;
 
+        protected World World { get; private set; }
+        internal void SetWorld(World world) => World = world;
+
         public virtual UpdateType UpdateType => UpdateType.Update;
 
         public bool IsUpdate() => IsEnabled && UpdateWhen();

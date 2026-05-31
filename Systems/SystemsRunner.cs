@@ -31,6 +31,7 @@ namespace EOS.Systems
             foreach (var type in types)
             {
                 var instance = (EosSystem)Activator.CreateInstance(type);
+                instance.SetWorld(World);
                 _all.Add(instance);
                 _typeToSystem[type] = instance;
                 instance.Awake();

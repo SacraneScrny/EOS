@@ -36,10 +36,10 @@ namespace EOS.Entities
 
         public static implicit operator int(EosEntity entity) => entity.Id;
 
-        public static bool operator ==(EosEntity a, EosEntity b) => a.Id == b.Id && a.Version == b.Version;
+        public static bool operator ==(EosEntity a, EosEntity b) => a.Id == b.Id && a.Version == b.Version && (a.World?.Id ?? -1) == (b.World?.Id ?? -1);
         public static bool operator !=(EosEntity a, EosEntity b) => !(a == b);
-        public bool Equals(EosEntity other) => Id == other.Id && Version == other.Version;
+        public bool Equals(EosEntity other) => Id == other.Id && Version == other.Version && (World?.Id ?? -1) == (other.World?.Id ?? -1);
         public override bool Equals(object obj) => obj is EosEntity other && Equals(other);
-        public override int GetHashCode() => HashCode.Combine(Id, Version);
+        public override int GetHashCode() => HashCode.Combine(Id, Version, World?.Id ?? -1);
     }
 }
