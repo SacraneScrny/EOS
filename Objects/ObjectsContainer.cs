@@ -47,26 +47,87 @@ namespace EOS.Objects
         internal void RegisterObject(EosObject obj)
         {
             if (obj == null) return;
-            if (obj is IObjectUpdate u) _updates.Add(u);
-            if (obj is IObjectFixedUpdate fu) _fixedUpdates.Add(fu);
-            if (obj is IObjectLateUpdate lu) _lateUpdates.Add(lu);
+            if (obj is IObjectUpdate u) { obj.UpdateIndex = _updates.Count; _updates.Add(u); }
+            if (obj is IObjectFixedUpdate fu) { obj.FixedIndex = _fixedUpdates.Count; _fixedUpdates.Add(fu); }
+            if (obj is IObjectLateUpdate lu) { obj.LateIndex = _lateUpdates.Count; _lateUpdates.Add(lu); }
+            obj.Initialized = false;
+            obj.PoolIndex = _waiting.Count;
             _waiting.Add(obj);
         }
         internal void UnregisterObject(EosObject obj)
         {
             if (obj == null) return;
-            if (obj is IObjectUpdate u) _updates.Remove(u);
-            if (obj is IObjectFixedUpdate fu) _fixedUpdates.Remove(fu);
-            if (obj is IObjectLateUpdate lu) _lateUpdates.Remove(lu);
-            _waiting.Remove(obj);
-            _inited.Remove(obj);
+            RemoveUpdate(obj);
+            RemoveFixed(obj);
+            RemoveLate(obj);
+            RemovePool(obj);
         }
 
         internal void MarkInitialized(EosObject obj)
         {
-            _waiting.Remove(obj);
+            RemovePool(obj);
+            obj.Initialized = true;
+            obj.PoolIndex = _inited.Count;
             _inited.Add(obj);
         }
         internal void MarkFailed(EosObject obj) => UnregisterObject(obj);
+
+        void RemoveUpdate(EosObject obj)
+        {
+            int i = obj.UpdateIndex;
+            if (i < 0) return;
+            int last = _updates.Count - 1;
+            if (i != last)
+            {
+                var moved = _updates[last];
+                _updates[i] = moved;
+                ((EosObject)moved).UpdateIndex = i;
+            }
+            _updates.RemoveAt(last);
+            obj.UpdateIndex = -1;
+        }
+        void RemoveFixed(EosObject obj)
+        {
+            int i = obj.FixedIndex;
+            if (i < 0) return;
+            int last = _fixedUpdates.Count - 1;
+            if (i != last)
+            {
+                var moved = _fixedUpdates[last];
+                _fixedUpdates[i] = moved;
+                ((EosObject)moved).FixedIndex = i;
+            }
+            _fixedUpdates.RemoveAt(last);
+            obj.FixedIndex = -1;
+        }
+        void RemoveLate(EosObject obj)
+        {
+            int i = obj.LateIndex;
+            if (i < 0) return;
+            int last = _lateUpdates.Count - 1;
+            if (i != last)
+            {
+                var moved = _lateUpdates[last];
+                _lateUpdates[i] = moved;
+                ((EosObject)moved).LateIndex = i;
+            }
+            _lateUpdates.RemoveAt(last);
+            obj.LateIndex = -1;
+        }
+        void RemovePool(EosObject obj)
+        {
+            int i = obj.PoolIndex;
+            if (i < 0) return;
+            var list = obj.Initialized ? _inited : _waiting;
+            int last = list.Count - 1;
+            if (i != last)
+            {
+                var moved = list[last];
+                list[i] = moved;
+                moved.PoolIndex = i;
+            }
+            list.RemoveAt(last);
+            obj.PoolIndex = -1;
+        }
     }
 }

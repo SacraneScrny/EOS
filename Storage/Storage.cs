@@ -12,41 +12,50 @@ namespace EOS.Storage
         T[] _data = new T[1024];
         int[] _owners = new int[1024];
         ushort[] _ownerVersions = new ushort[1024];
-        readonly Dictionary<ulong, int> _index = new();
-        readonly List<int> _recentlyAdded = new();
+        int[] _addedFrame = new int[1024];
+        int[] _sparse = new int[1024];
+        int _frame;
+        readonly List<EosEntity> _recent = new();
 
         public int Count { get; private set; }
         public ReadOnlySpan<T> All => _data.AsSpan(0, Count);
-        public IReadOnlyList<int> RecentlyAdded => _recentlyAdded;
+        public IReadOnlyList<EosEntity> RecentlyAdded => _recent;
 
-        static ulong Key(EosEntity entity) => ((ulong)entity.Version << 32) | (uint)entity.Id;
+        public int IndexOf(EosEntity entity)
+        {
+            int id = entity.Id;
+            if (id < 0 || id >= _sparse.Length) return -1;
+            int dense = _sparse[id];
+            if (dense < Count && _owners[dense] == id && _ownerVersions[dense] == entity.Version)
+                return dense;
+            return -1;
+        }
 
         public T Add(EosEntity entity)
         {
-            var key = Key(entity);
-            if (_index.TryGetValue(key, out var existing))
-                return _data[existing];
+            int existing = IndexOf(entity);
+            if (existing >= 0) return _data[existing];
 
-            if (Count >= _data.Length)
-            {
-                Array.Resize(ref _data, _data.Length * 2);
-                Array.Resize(ref _owners, _owners.Length * 2);
-                Array.Resize(ref _ownerVersions, _ownerVersions.Length * 2);
-            }
+            EnsureData(Count + 1);
+            EnsureSparse(entity.Id);
 
             int i = Count++;
             _owners[i] = entity.Id;
             _ownerVersions[i] = entity.Version;
-            _index[key] = i;
+            _addedFrame[i] = -1;
+            _sparse[entity.Id] = i;
             _data[i] = new T();
             _data[i].SetupObject(entity);
+
+            World.ObjectsStorages.TrackEntity(entity, this);
             return _data[i];
         }
 
-        public T Get(EosEntity entity) => _data[_index[Key(entity)]];
+        public T Get(EosEntity entity) => _data[IndexOf(entity)];
         public bool TryGet(EosEntity entity, out T result)
         {
-            if (_index.TryGetValue(Key(entity), out var i))
+            int i = IndexOf(entity);
+            if (i >= 0)
             {
                 result = _data[i];
                 return true;
@@ -54,13 +63,19 @@ namespace EOS.Storage
             result = null;
             return false;
         }
-        public bool Has(EosEntity entity) => _index.ContainsKey(Key(entity));
+        public bool Has(EosEntity entity) => IndexOf(entity) >= 0;
         public EosEntity GetOwner(int index) => new(_owners[index], _ownerVersions[index], World);
+
+        public bool IsRecent(EosEntity entity)
+        {
+            int i = IndexOf(entity);
+            return i >= 0 && _addedFrame[i] == _frame;
+        }
 
         public bool Remove(EosEntity entity)
         {
-            var key = Key(entity);
-            if (!_index.TryGetValue(key, out var i)) return false;
+            int i = IndexOf(entity);
+            if (i < 0) return false;
             var toDispose = _data[i];
             int last = --Count;
 
@@ -69,15 +84,17 @@ namespace EOS.Storage
                 _data[i] = _data[last];
                 _owners[i] = _owners[last];
                 _ownerVersions[i] = _ownerVersions[last];
-                _index[((ulong)_ownerVersions[i] << 32) | (uint)_owners[i]] = i;
+                _addedFrame[i] = _addedFrame[last];
+                _sparse[_owners[i]] = i;
             }
 
-            _index.Remove(key);
             toDispose.Dispose();
             _data[last] = null;
             _owners[last] = 0;
             _ownerVersions[last] = 0;
+            _addedFrame[last] = 0;
 
+            World.ObjectsStorages.UntrackEntity(entity, this);
             return true;
         }
 
@@ -85,22 +102,47 @@ namespace EOS.Storage
 
         public void Clear()
         {
-            _data = new T[1024];
-            _owners = new int[1024];
-            _ownerVersions = new ushort[1024];
-            _index.Clear();
+            Array.Clear(_data, 0, Count);
+            Array.Clear(_owners, 0, Count);
+            Array.Clear(_ownerVersions, 0, Count);
+            Array.Clear(_addedFrame, 0, Count);
             Count = 0;
-            _recentlyAdded.Clear();
+            _frame = 0;
+            _recent.Clear();
         }
 
-        public void ClearRecent() => _recentlyAdded.Clear();
+        public void ClearRecent()
+        {
+            _frame++;
+            _recent.Clear();
+        }
 
         public bool IsReady(int index) => _data[index] != null && _data[index].IsEnabled;
 
         public void MarkReady(EosEntity entity)
         {
-            if (_index.TryGetValue(Key(entity), out var i))
-                _recentlyAdded.Add(i);
+            int i = IndexOf(entity);
+            if (i < 0) return;
+            _addedFrame[i] = _frame;
+            _recent.Add(entity);
+        }
+
+        void EnsureData(int count)
+        {
+            if (count <= _data.Length) return;
+            int n = _data.Length * 2;
+            while (n < count) n *= 2;
+            Array.Resize(ref _data, n);
+            Array.Resize(ref _owners, n);
+            Array.Resize(ref _ownerVersions, n);
+            Array.Resize(ref _addedFrame, n);
+        }
+        void EnsureSparse(int id)
+        {
+            if (id < _sparse.Length) return;
+            int n = _sparse.Length * 2;
+            while (n <= id) n *= 2;
+            Array.Resize(ref _sparse, n);
         }
 
         object IIndexedStorage.GetAt(int index) => _data[index];
