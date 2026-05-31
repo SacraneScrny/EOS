@@ -9,13 +9,31 @@ namespace EOS.Systems
 {
     public partial class SystemsRunner : WorldBound
     {
-        readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _update = new();
-        readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _fixedUpdate = new();
-        readonly List<(Action<float> action, Func<bool> isUpdate, Type type)> _lateUpdate = new();
-        
+        sealed class SystemEntry
+        {
+            public readonly Action<float, ulong> Body;
+            public readonly Func<bool> IsUpdate;
+            public readonly Type Type;
+            public readonly bool Reactive;
+            public ulong Cursor;
+
+            public SystemEntry(Action<float, ulong> body, Func<bool> isUpdate, Type type, bool reactive, ulong cursor)
+            {
+                Body = body;
+                IsUpdate = isUpdate;
+                Type = type;
+                Reactive = reactive;
+                Cursor = cursor;
+            }
+        }
+
+        readonly List<SystemEntry> _update = new();
+        readonly List<SystemEntry> _fixedUpdate = new();
+        readonly List<SystemEntry> _lateUpdate = new();
+
         readonly List<EosSystem> _all = new();
         readonly Dictionary<Type, EosSystem> _typeToSystem = new();
-        
+
         protected override void OnInited()
         {
             _typeToSystem.Clear();
@@ -52,13 +70,14 @@ namespace EOS.Systems
 
                 foreach (var method in methods)
                 {
-                    var action = BuildQuery(instance, method);
+                    var (body, reactive) = BuildQuery(instance, method);
+                    var entry = new SystemEntry(body, isUpdate, type, reactive, reactive ? World.Version : 0UL);
 
                     switch (instance.UpdateType)
                     {
-                        case UpdateType.Update: _update.Add((action, isUpdate, type)); break;
-                        case UpdateType.FixedUpdate: _fixedUpdate.Add((action, isUpdate, type)); break;
-                        case UpdateType.LateUpdate: _lateUpdate.Add((action, isUpdate, type)); break;
+                        case UpdateType.Update: _update.Add(entry); break;
+                        case UpdateType.FixedUpdate: _fixedUpdate.Add(entry); break;
+                        case UpdateType.LateUpdate: _lateUpdate.Add(entry); break;
                     }
                 }
             }
@@ -75,24 +94,36 @@ namespace EOS.Systems
         internal void FixedUpdate(float deltaTime) => Run(_fixedUpdate, deltaTime);
         internal void LateUpdate(float deltaTime) => Run(_lateUpdate, deltaTime);
 
-        void Run(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems, float deltaTime)
+        void Run(List<SystemEntry> systems, float deltaTime)
         {
             for (int i = 0; i < systems.Count; i++)
             {
-                var s = systems[i];
-                if (s.isUpdate()) s.action(deltaTime);
+                var entry = systems[i];
+
+                if (entry.Reactive)
+                {
+                    ulong now = World.Version;
+                    if (entry.IsUpdate())
+                        entry.Body(deltaTime, entry.Cursor);
+                    entry.Cursor = now;
+                }
+                else if (entry.IsUpdate())
+                {
+                    entry.Body(deltaTime, 0UL);
+                }
             }
         }
-        void TopologicalSort(List<(Action<float> action, Func<bool> isUpdate, Type type)> systems)
+
+        void TopologicalSort(List<SystemEntry> systems)
         {
             int n = systems.Count;
             var typeToIndices = new Dictionary<Type, List<int>>(n);
             for (int i = 0; i < n; i++)
             {
-                if (!typeToIndices.TryGetValue(systems[i].type, out var list))
+                if (!typeToIndices.TryGetValue(systems[i].Type, out var list))
                 {
                     list = new List<int>();
-                    typeToIndices[systems[i].type] = list;
+                    typeToIndices[systems[i].Type] = list;
                 }
                 list.Add(i);
             }
@@ -104,7 +135,7 @@ namespace EOS.Systems
 
             for (int i = 0; i < n; i++)
             {
-                var type = systems[i].type;
+                var type = systems[i].Type;
                 foreach (var attr in type.GetCustomAttributes<UpdateAfterAttribute>())
                     if (typeToIndices.TryGetValue(attr.Target, out var targets))
                     {
@@ -130,7 +161,7 @@ namespace EOS.Systems
             for (int i = 0; i < n; i++)
                 if (inDegree[i] == 0) queue.Enqueue(i);
 
-            var result = new List<(Action<float>, Func<bool>, Type)>(n);
+            var result = new List<SystemEntry>(n);
             while (queue.Count > 0)
             {
                 int cur = queue.Dequeue();
@@ -145,7 +176,7 @@ namespace EOS.Systems
             systems.Clear();
             systems.AddRange(result);
         }
-        
+
         public T GetSystem<T>() where T : EosSystem => _typeToSystem.TryGetValue(typeof(T), out var system) ? (T)system : null;
         public IEnumerable<EosSystem> All => _all;
     }

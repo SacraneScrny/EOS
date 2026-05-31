@@ -6,6 +6,5 @@ namespace EOS.Storage
     {
         void RemoveEntity(EosEntity entity);
         void Clear();
-        void ClearRecent();
     }
 }

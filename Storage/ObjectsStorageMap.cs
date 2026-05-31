@@ -77,10 +77,10 @@ namespace EOS.Storage
             if (_map.TryGetValue(obj.GetType(), out var storage))
                 (storage as IIndexedStorage)?.MarkReady(obj.Entity);
         }
-        internal void ClearAllRecent()
+        internal void Bump(EosObject obj)
         {
-            foreach (var storage in _map.Values)
-                storage.ClearRecent();
+            if (_map.TryGetValue(obj.GetType(), out var storage))
+                (storage as IIndexedStorage)?.Bump(obj.Entity);
         }
 
         internal void DestroyEntity(EosEntity entity)

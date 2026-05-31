@@ -24,6 +24,11 @@ namespace EOS.Extensions
         public static bool Remove<T>(this EosEntity entity) where T : EosObject, new()
             => entity.IsValid && entity.World.ObjectsStorages.Get<T>().Remove(entity);
 
+        public static void Bump<T>(this EosEntity entity) where T : EosObject, new()
+        {
+            if (entity.IsValid) entity.World.ObjectsStorages.Get<T>().Bump(entity);
+        }
+
         public static void On(this EosEntity entity) => entity.World?.Entities.SetActive(entity, true);
         public static void Off(this EosEntity entity) => entity.World?.Entities.SetActive(entity, false);
     }

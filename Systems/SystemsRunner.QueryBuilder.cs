@@ -17,18 +17,25 @@ namespace EOS.Systems
         const string GET_OWNER = "GetOwner";
         const string COUNT = "Count";
 
-        Action<float> BuildQuery(object instance, MethodInfo method)
+        // Builds the query body for one Execute method. The body is a pure iteration of the
+        // form (deltaTime, cursor) => run-once-per-matching-entity. It carries NO scheduling
+        // policy: the runner decides when to call it (IsUpdate) and what cursor to pass.
+        // For non-reactive queries the cursor is ignored; for reactive ([New]/[Bumped]) ones
+        // only entities whose channel version is strictly newer than the cursor are visited.
+        (Action<float, ulong> body, bool reactive) BuildQuery(object instance, MethodInfo method)
         {
             var parameters = method.GetParameters();
             int entityParamIndex = -1;
             int deltaTimeParamIndex = -1;
 
-            var concreteParams = new List<(int position, Type type, bool onlyNew, bool optional)>();
-            var interfaceParams = new List<(int position, Type type, bool onlyNew, bool optional)>();
+            var concreteParams = new List<(int position, Type type, Channel channel, bool optional)>();
+            var interfaceParams = new List<(int position, Type type, Channel channel, bool optional)>();
 
             foreach (var p in parameters)
             {
-                bool onlyNew = p.GetCustomAttribute<OnlyNewAttribute>() != null;
+                Channel channel = Channel.None;
+                if (p.GetCustomAttribute<NewAttribute>() != null) channel = Channel.New;
+                else if (p.GetCustomAttribute<BumpedAttribute>() != null) channel = Channel.Bumped;
                 bool optional = p.GetCustomAttribute<OptionalAttribute>() != null;
 
                 if (p.ParameterType == typeof(EosEntity))
@@ -36,14 +43,15 @@ namespace EOS.Systems
                 else if (p.ParameterType == typeof(float))
                     deltaTimeParamIndex = p.Position;
                 else if (p.ParameterType.IsInterface)
-                    interfaceParams.Add((p.Position, p.ParameterType, onlyNew, optional));
+                    interfaceParams.Add((p.Position, p.ParameterType, channel, optional));
                 else if (typeof(EosObject).IsAssignableFrom(p.ParameterType))
-                    concreteParams.Add((p.Position, p.ParameterType, onlyNew, optional));
+                    concreteParams.Add((p.Position, p.ParameterType, channel, optional));
                 else
                     throw new Exception($"Unsupported parameter type {p.ParameterType.Name} in {method.Name}");
             }
 
-            bool hasOnlyNew = concreteParams.Any(p => p.onlyNew) || interfaceParams.Any(p => p.onlyNew);
+            bool isReactive = concreteParams.Any(p => p.channel != Channel.None)
+                              || interfaceParams.Any(p => p.channel != Channel.None);
 
             var excludeTypes = new List<Type>();
             foreach (var attr in method.GetCustomAttributes<ExcludeAttribute>(true))
@@ -66,48 +74,48 @@ namespace EOS.Systems
             var concreteIndexed = concreteStorages.Select(s => s as IIndexedStorage).ToArray();
             var concreteOptional = concreteParams.Select(p => p.optional).ToArray();
 
-            if (concreteParams.Count == 0 && interfaceParams.Count == 0)
-                return BuildNoComponentQuery(instance, method, parameters,
-                    entityParamIndex, deltaTimeParamIndex,
-                    includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods);
-
-            if (hasOnlyNew)
-                return BuildOnlyNewQuery(instance, method, parameters,
+            if (isReactive)
+                return (BuildReactiveQuery(instance, method, parameters,
                     concreteParams, concreteStorages, concreteGetMethods, concreteHasMethods,
                     concreteIndexed, concreteOptional,
                     interfaceParams,
                     entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods);
+                    excludeStorages, excludeHasMethods), true);
+
+            if (concreteParams.Count == 0 && interfaceParams.Count == 0)
+                return (BuildNoComponentQuery(instance, method, parameters,
+                    entityParamIndex, deltaTimeParamIndex,
+                    includeStorages, includeHasMethods,
+                    excludeStorages, excludeHasMethods), false);
 
             if (concreteParams.Count == 0)
-                return BuildInterfaceOnlyQuery(instance, method, parameters,
+                return (BuildInterfaceOnlyQuery(instance, method, parameters,
                     interfaceParams, entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods);
+                    excludeStorages, excludeHasMethods), false);
 
-            return BuildConcreteQuery(instance, method, parameters,
+            return (BuildConcreteQuery(instance, method, parameters,
                 concreteParams, concreteStorages, concreteGetMethods, concreteHasMethods,
                 concreteGetOwners, concreteCountProps, concreteIndexed, concreteOptional,
                 interfaceParams,
                 entityParamIndex, deltaTimeParamIndex,
                 includeStorages, includeHasMethods,
-                excludeStorages, excludeHasMethods);
+                excludeStorages, excludeHasMethods), false);
         }
 
-        Action<float> BuildConcreteQuery(
+        Action<float, ulong> BuildConcreteQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
-            List<(int position, Type type, bool onlyNew, bool optional)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods, MethodInfo[] concreteHasMethods,
             MethodInfo[] concreteGetOwners, PropertyInfo[] concreteCountProps,
             IIndexedStorage[] concreteIndexed, bool[] concreteOptional,
-            List<(int position, Type type, bool onlyNew, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
         {
-            return (deltaTime) =>
+            return (deltaTime, _) =>
             {
                 int pivot = 0;
                 int min = int.MaxValue;
@@ -141,109 +149,87 @@ namespace EOS.Systems
             };
         }
 
-        Action<float> BuildOnlyNewQuery(
+        // Reactive query body: visit only entities whose driver channel version is newer than
+        // `cursor`. No gating, no cursor bookkeeping here — that is entirely the runner's job.
+        Action<float, ulong> BuildReactiveQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
-            List<(int position, Type type, bool onlyNew, bool optional)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods, MethodInfo[] concreteHasMethods,
             IIndexedStorage[] concreteIndexed, bool[] concreteOptional,
-            List<(int position, Type type, bool onlyNew, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
         {
-            int onlyNewPivot = concreteParams.FindIndex(p => p.onlyNew && !p.optional);
+            int driverConcrete = concreteParams.FindIndex(p => p.channel != Channel.None && !p.optional);
 
-            return (deltaTime) =>
+            if (driverConcrete >= 0)
             {
-                if (onlyNewPivot >= 0)
+                var driver = concreteIndexed[driverConcrete];
+                Channel driverChannel = concreteParams[driverConcrete].channel;
+
+                return (deltaTime, cursor) =>
                 {
-                    var pivotIndexed = concreteIndexed[onlyNewPivot];
-                    var recent = pivotIndexed.RecentlyAdded;
+                    if (ChannelMax(driver, driverChannel) <= cursor) return;
 
-                    for (int r = 0; r < recent.Count; r++)
+                    int count = driver.Count;
+                    for (int i = 0; i < count; i++)
                     {
-                        var entity = recent[r];
-                        int i = pivotIndexed.IndexOf(entity);
-                        if (i < 0) continue;
-                        if (!pivotIndexed.IsReady(i)) continue;
+                        if (!driver.IsReady(i)) continue;
+                        if (ChannelVersionAt(driver, i, driverChannel) <= cursor) continue;
 
-                        bool valid = true;
+                        var entity = driver.GetOwner(i);
 
-                        for (int j = 0; j < concreteParams.Count; j++)
-                        {
-                            if (j == onlyNewPivot) continue;
-                            if (concreteParams[j].onlyNew)
-                            {
-                                if (concreteParams[j].optional)
-                                {
-                                    var comp = concreteIndexed[j].TryGetObject(entity);
-                                    if (comp != null && !concreteIndexed[j].IsRecent(entity))
-                                    { valid = false; break; }
-                                }
-                                else
-                                {
-                                    var comp = concreteIndexed[j].TryGetObject(entity);
-                                    if (comp == null) { valid = false; break; }
-                                    if (!concreteIndexed[j].IsRecent(entity))
-                                    { valid = false; break; }
-                                }
-                            }
-                            else if (!concreteOptional[j])
-                            {
-                                if (!(bool)concreteHasMethods[j].Invoke(concreteStorages[j], new object[] { entity }))
-                                { valid = false; break; }
-                            }
-                        }
-                        if (!valid) continue;
+                        if (!ReactiveConcreteMatch(entity, concreteParams, concreteIndexed,
+                            concreteHasMethods, concreteStorages, driverConcrete, cursor)) continue;
 
                         if (!CheckIncludeExclude(entity,
                             includeStorages, includeHasMethods,
                             excludeStorages, excludeHasMethods)) continue;
 
-                        var ifaceComponents = ResolveInterfaceComponentsOnlyNew(entity, interfaceParams);
+                        var ifaceComponents = ResolveInterfaceComponentsReactive(entity, interfaceParams, cursor);
                         if (ifaceComponents == null) continue;
 
                         method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
                             deltaTimeParamIndex, entityParamIndex,
-                            concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, onlyNewPivot, i,
+                            concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, driverConcrete, i,
                             interfaceParams, ifaceComponents));
                     }
-                }
-                else
-                {
-                    // pivot — первый обязательный [OnlyNew] интерфейс
-                    var pivotIfaceType = interfaceParams.First(p => p.onlyNew && !p.optional).type;
-                    var pivotStorages = World.ObjectsStorages.GetByInterface(pivotIfaceType);
-                    if (pivotStorages == null) return;
+                };
+            }
+            else
+            {
+                var driverIface = interfaceParams.First(p => p.channel != Channel.None && !p.optional);
+                Channel driverChannel = driverIface.channel;
+                Type driverType = driverIface.type;
 
-                    foreach (var storage in pivotStorages)
+                return (deltaTime, cursor) =>
+                {
+                    var storages = World.ObjectsStorages.GetByInterface(driverType);
+                    if (storages == null) return;
+
+                    foreach (var storage in storages)
                     {
                         var indexed = storage as IIndexedStorage;
                         if (indexed == null) continue;
-                        var recent = indexed.RecentlyAdded;
+                        if (ChannelMax(indexed, driverChannel) <= cursor) continue;
 
-                        for (int r = 0; r < recent.Count; r++)
+                        int count = indexed.Count;
+                        for (int i = 0; i < count; i++)
                         {
-                            var entity = recent[r];
-                            int idx = indexed.IndexOf(entity);
-                            if (idx < 0) continue;
-                            if (!indexed.IsReady(idx)) continue;
+                            if (!indexed.IsReady(i)) continue;
+                            if (ChannelVersionAt(indexed, i, driverChannel) <= cursor) continue;
 
-                            bool valid = true;
+                            var entity = indexed.GetOwner(i);
 
-                            for (int j = 0; j < concreteParams.Count; j++)
-                            {
-                                if (concreteOptional[j]) continue;
-                                if (!(bool)concreteHasMethods[j].Invoke(concreteStorages[j], new object[] { entity }))
-                                { valid = false; break; }
-                            }
-                            if (!valid) continue;
+                            if (!ReactiveConcreteMatch(entity, concreteParams, concreteIndexed,
+                                concreteHasMethods, concreteStorages, -1, cursor)) continue;
 
                             if (!CheckIncludeExclude(entity,
                                 includeStorages, includeHasMethods,
                                 excludeStorages, excludeHasMethods)) continue;
 
-                            var ifaceComponents = ResolveInterfaceComponentsOnlyNew(entity, interfaceParams);
+                            var ifaceComponents = ResolveInterfaceComponentsReactive(entity, interfaceParams, cursor);
                             if (ifaceComponents == null) continue;
 
                             method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
@@ -252,11 +238,11 @@ namespace EOS.Systems
                                 interfaceParams, ifaceComponents));
                         }
                     }
-                }
-            };
+                };
+            }
         }
 
-        Action<float> BuildNoComponentQuery(
+        Action<float, ulong> BuildNoComponentQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
@@ -264,7 +250,7 @@ namespace EOS.Systems
         {
             if (entityParamIndex == -1)
             {
-                return (deltaTime) =>
+                return (deltaTime, _) =>
                 {
                     var args = new object[parameters.Length];
                     if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
@@ -272,7 +258,7 @@ namespace EOS.Systems
                 };
             }
 
-            return (deltaTime) =>
+            return (deltaTime, _) =>
             {
                 var args = new object[parameters.Length];
                 if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
@@ -289,16 +275,16 @@ namespace EOS.Systems
             };
         }
 
-        Action<float> BuildInterfaceOnlyQuery(
+        Action<float, ulong> BuildInterfaceOnlyQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
-            List<(int position, Type type, bool onlyNew, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
         {
             var pivotIfaceType = interfaceParams.First(p => !p.optional).type;
 
-            return (deltaTime) =>
+            return (deltaTime, _) =>
             {
                 var pivotStorages = World.ObjectsStorages.GetByInterface(pivotIfaceType);
                 if (pivotStorages == null) return;
@@ -338,9 +324,52 @@ namespace EOS.Systems
 
         // -------------------------------------------------------------------
 
+        static ulong ChannelVersionAt(IIndexedStorage storage, int index, Channel channel)
+            => channel == Channel.Bumped ? storage.MarkVersionAt(index) : storage.AddVersionAt(index);
+
+        static ulong ChannelMax(IIndexedStorage storage, Channel channel)
+            => channel == Channel.Bumped ? storage.MaxMarkVersion : storage.MaxAddVersion;
+
+        // Validates concrete parameters other than the driver:
+        //  - reactive (New/Bumped): must be present AND have a version newer than the cursor
+        //  - required non-reactive: must be present
+        //  - optional non-reactive: no constraint
+        //  - optional reactive: absent is fine, but present-yet-stale fails the match
+        bool ReactiveConcreteMatch(
+            EosEntity entity,
+            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
+            IIndexedStorage[] concreteIndexed, MethodInfo[] concreteHasMethods, object[] concreteStorages,
+            int driverIndex, ulong cursor)
+        {
+            for (int j = 0; j < concreteParams.Count; j++)
+            {
+                if (j == driverIndex) continue;
+                var channel = concreteParams[j].channel;
+                bool optional = concreteParams[j].optional;
+
+                if (channel != Channel.None)
+                {
+                    int idx = concreteIndexed[j].IndexOf(entity);
+                    if (idx < 0)
+                    {
+                        if (optional) continue;
+                        return false;
+                    }
+                    if (ChannelVersionAt(concreteIndexed[j], idx, channel) <= cursor)
+                        return false;
+                }
+                else if (!optional)
+                {
+                    if (!(bool)concreteHasMethods[j].Invoke(concreteStorages[j], new object[] { entity }))
+                        return false;
+                }
+            }
+            return true;
+        }
+
         object[] ResolveInterfaceComponents(
             EosEntity entity,
-            List<(int position, Type type, bool onlyNew, bool optional)> interfaceParams)
+            List<(int position, Type type, Channel channel, bool optional)> interfaceParams)
         {
             var result = new object[interfaceParams.Count];
             for (int j = 0; j < interfaceParams.Count; j++)
@@ -352,14 +381,15 @@ namespace EOS.Systems
             return result;
         }
 
-        object[] ResolveInterfaceComponentsOnlyNew(
+        object[] ResolveInterfaceComponentsReactive(
             EosEntity entity,
-            List<(int position, Type type, bool onlyNew, bool optional)> interfaceParams)
+            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
+            ulong cursor)
         {
             var result = new object[interfaceParams.Count];
             for (int j = 0; j < interfaceParams.Count; j++)
             {
-                var (position, type, onlyNew, optional) = interfaceParams[j];
+                var (position, type, channel, optional) = interfaceParams[j];
                 var storages = World.ObjectsStorages.GetByInterface(type);
 
                 object found = null;
@@ -369,10 +399,13 @@ namespace EOS.Systems
                     {
                         var indexed = storage as IIndexedStorage;
                         if (indexed == null) continue;
-                        var component = indexed.TryGetObject(entity);
+                        int idx = indexed.IndexOf(entity);
+                        if (idx < 0) continue;
+                        var component = indexed.GetAt(idx);
                         if (component == null) continue;
 
-                        if (onlyNew && !indexed.IsRecent(entity)) continue;
+                        if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor)
+                            continue;
 
                         found = component;
                         break;
@@ -403,10 +436,10 @@ namespace EOS.Systems
         object[] BuildArgs(
             ParameterInfo[] parameters, EosEntity entity, float deltaTime,
             int deltaTimeParamIndex, int entityParamIndex,
-            List<(int position, Type type, bool onlyNew, bool optional)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods,
             IIndexedStorage[] concreteIndexed, int pivot, int pivotIndex,
-            List<(int position, Type type, bool onlyNew, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
             object[] ifaceComponents)
         {
             var args = new object[parameters.Length];

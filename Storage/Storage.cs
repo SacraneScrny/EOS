@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using EOS.Core;
 using EOS.Entities;
 using EOS.Objects;
@@ -12,14 +11,17 @@ namespace EOS.Storage
         T[] _data = new T[1024];
         int[] _owners = new int[1024];
         ushort[] _ownerVersions = new ushort[1024];
-        int[] _addedFrame = new int[1024];
+        ulong[] _addVersion = new ulong[1024];
+        ulong[] _markVersion = new ulong[1024];
         int[] _sparse = new int[1024];
-        int _frame;
-        readonly List<EosEntity> _recent = new();
 
         public int Count { get; private set; }
         public ReadOnlySpan<T> All => _data.AsSpan(0, Count);
-        public IReadOnlyList<EosEntity> RecentlyAdded => _recent;
+
+        public ulong MaxAddVersion { get; private set; }
+        public ulong MaxMarkVersion { get; private set; }
+        public ulong AddVersionAt(int index) => _addVersion[index];
+        public ulong MarkVersionAt(int index) => _markVersion[index];
 
         public int IndexOf(EosEntity entity)
         {
@@ -42,7 +44,8 @@ namespace EOS.Storage
             int i = Count++;
             _owners[i] = entity.Id;
             _ownerVersions[i] = entity.Version;
-            _addedFrame[i] = -1;
+            _addVersion[i] = 0;
+            _markVersion[i] = 0;
             _sparse[entity.Id] = i;
             _data[i] = new T();
             _data[i].SetupObject(entity);
@@ -67,12 +70,6 @@ namespace EOS.Storage
         public EosEntity GetOwner(int index) =>
             new(_owners[index], _ownerVersions[index], World, World.Entities.GetName(_owners[index]));
 
-        public bool IsRecent(EosEntity entity)
-        {
-            int i = IndexOf(entity);
-            return i >= 0 && _addedFrame[i] == _frame;
-        }
-
         public bool Remove(EosEntity entity)
         {
             int i = IndexOf(entity);
@@ -85,7 +82,8 @@ namespace EOS.Storage
                 _data[i] = _data[last];
                 _owners[i] = _owners[last];
                 _ownerVersions[i] = _ownerVersions[last];
-                _addedFrame[i] = _addedFrame[last];
+                _addVersion[i] = _addVersion[last];
+                _markVersion[i] = _markVersion[last];
                 _sparse[_owners[i]] = i;
             }
 
@@ -93,7 +91,8 @@ namespace EOS.Storage
             _data[last] = null;
             _owners[last] = 0;
             _ownerVersions[last] = 0;
-            _addedFrame[last] = 0;
+            _addVersion[last] = 0;
+            _markVersion[last] = 0;
 
             World.ObjectsStorages.UntrackEntity(entity, this);
             return true;
@@ -113,27 +112,31 @@ namespace EOS.Storage
             Array.Clear(_data, 0, count);
             Array.Clear(_owners, 0, count);
             Array.Clear(_ownerVersions, 0, count);
-            Array.Clear(_addedFrame, 0, count);
+            Array.Clear(_addVersion, 0, count);
+            Array.Clear(_markVersion, 0, count);
             Count = 0;
-            _frame = 0;
-            _recent.Clear();
-        }
-
-        public void ClearRecent()
-        {
-            _frame++;
-            _recent.Clear();
+            MaxAddVersion = 0;
+            MaxMarkVersion = 0;
         }
 
         public bool IsReady(int index) => _data[index] != null && _data[index].IsEnabled;
 
+        // "New" channel — stamped once when the object becomes ready (init).
         public void MarkReady(EosEntity entity)
         {
             int i = IndexOf(entity);
             if (i < 0) return;
-            if (_addedFrame[i] == _frame) return;
-            _addedFrame[i] = _frame;
-            _recent.Add(entity);
+            _addVersion[i] = World.NextVersion();
+            MaxAddVersion = _addVersion[i];
+        }
+
+        // "Bumped" channel — stamped on demand by user code after important changes.
+        public void Bump(EosEntity entity)
+        {
+            int i = IndexOf(entity);
+            if (i < 0) return;
+            _markVersion[i] = World.NextVersion();
+            MaxMarkVersion = _markVersion[i];
         }
 
         void EnsureData(int count)
@@ -144,7 +147,8 @@ namespace EOS.Storage
             Array.Resize(ref _data, n);
             Array.Resize(ref _owners, n);
             Array.Resize(ref _ownerVersions, n);
-            Array.Resize(ref _addedFrame, n);
+            Array.Resize(ref _addVersion, n);
+            Array.Resize(ref _markVersion, n);
         }
         void EnsureSparse(int id)
         {

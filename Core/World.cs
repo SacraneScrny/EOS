@@ -41,7 +41,11 @@ namespace EOS.Core
         public bool IsDisposed { get; private set; }
         public bool IsEnabled { get; private set; }
         public bool IsManualUpdate { get; set; }
-        
+
+        ulong _version;
+        public ulong Version => _version;
+        internal ulong NextVersion() => ++_version;
+
         public EntitiesContainer Entities { get; } = new();
         public ObjectsContainer Objects { get; } = new();
         public SystemsRunner Systems { get; } = new();
@@ -120,7 +124,6 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
-            ObjectsStorages.ClearAllRecent();
             _beforeAll.Execute();
             _beforeUpdate.Execute();
             InitializeSystems.Run();
