@@ -46,6 +46,13 @@ namespace EOS.Core
         public ulong Version => _version;
         internal ulong NextVersion() => ++_version;
 
+        // Monotonic update-cycle counter. Bumped once at the start of every Update/FixedUpdate/
+        // LateUpdate cycle and used to coalesce repeated Bump() calls within the same cycle so the
+        // version clock does not inflate when user code bumps a component every frame.
+        ulong _frame;
+        public ulong Frame => _frame;
+        internal ulong NextFrame() => ++_frame;
+
         public EntitiesContainer Entities { get; } = new();
         public ObjectsContainer Objects { get; } = new();
         public SystemsRunner Systems { get; } = new();
@@ -124,6 +131,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            NextFrame();
             _beforeAll.Execute();
             _beforeUpdate.Execute();
             InitializeSystems.Run();
@@ -135,6 +143,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            NextFrame();
             _beforeFixedUpdate.Execute();
             Systems.FixedUpdate(deltaTime);
             Objects.FixedUpdate(deltaTime);
@@ -144,6 +153,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            NextFrame();
             _beforeLateUpdate.Execute();
             Systems.LateUpdate(deltaTime);
             Objects.LateUpdate(deltaTime);

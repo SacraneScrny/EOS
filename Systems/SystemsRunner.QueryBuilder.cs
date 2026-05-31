@@ -29,7 +29,7 @@ namespace EOS.Systems
             int deltaTimeParamIndex = -1;
 
             var concreteParams = new List<(int position, Type type, Channel channel, bool optional)>();
-            var interfaceParams = new List<(int position, Type type, Channel channel, bool optional)>();
+            var interfaceParams = new List<(int position, Type type, Channel channel, bool optional, bool each)>();
 
             foreach (var p in parameters)
             {
@@ -37,13 +37,14 @@ namespace EOS.Systems
                 if (p.GetCustomAttribute<NewAttribute>() != null) channel = Channel.New;
                 else if (p.GetCustomAttribute<BumpedAttribute>() != null) channel = Channel.Bumped;
                 bool optional = p.GetCustomAttribute<OptionalAttribute>() != null;
+                bool each = p.GetCustomAttribute<EachAttribute>() != null;
 
                 if (p.ParameterType == typeof(EosEntity))
                     entityParamIndex = p.Position;
                 else if (p.ParameterType == typeof(float))
                     deltaTimeParamIndex = p.Position;
                 else if (p.ParameterType.IsInterface)
-                    interfaceParams.Add((p.Position, p.ParameterType, channel, optional));
+                    interfaceParams.Add((p.Position, p.ParameterType, channel, optional, each));
                 else if (typeof(EosObject).IsAssignableFrom(p.ParameterType))
                     concreteParams.Add((p.Position, p.ParameterType, channel, optional));
                 else
@@ -110,7 +111,7 @@ namespace EOS.Systems
             object[] concreteStorages, MethodInfo[] concreteGetMethods, MethodInfo[] concreteHasMethods,
             MethodInfo[] concreteGetOwners, PropertyInfo[] concreteCountProps,
             IIndexedStorage[] concreteIndexed, bool[] concreteOptional,
-            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
@@ -138,13 +139,14 @@ namespace EOS.Systems
                         includeStorages, includeHasMethods,
                         excludeStorages, excludeHasMethods)) continue;
 
-                    var ifaceComponents = ResolveInterfaceComponents(entity, interfaceParams);
-                    if (ifaceComponents == null) continue;
+                    var combos = ResolveInterfaceCombinations(entity, interfaceParams);
+                    if (combos == null) continue;
 
-                    method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
-                        deltaTimeParamIndex, entityParamIndex,
-                        concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, pivot, i,
-                        interfaceParams, ifaceComponents));
+                    for (int c = 0; c < combos.Count; c++)
+                        method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
+                            deltaTimeParamIndex, entityParamIndex,
+                            concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, pivot, i,
+                            interfaceParams, combos[c]));
                 }
             };
         }
@@ -156,7 +158,7 @@ namespace EOS.Systems
             List<(int position, Type type, Channel channel, bool optional)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods, MethodInfo[] concreteHasMethods,
             IIndexedStorage[] concreteIndexed, bool[] concreteOptional,
-            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
@@ -187,13 +189,14 @@ namespace EOS.Systems
                             includeStorages, includeHasMethods,
                             excludeStorages, excludeHasMethods)) continue;
 
-                        var ifaceComponents = ResolveInterfaceComponentsReactive(entity, interfaceParams, cursor);
-                        if (ifaceComponents == null) continue;
+                        var combos = ResolveInterfaceCombinationsReactive(entity, interfaceParams, cursor);
+                        if (combos == null) continue;
 
-                        method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
-                            deltaTimeParamIndex, entityParamIndex,
-                            concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, driverConcrete, i,
-                            interfaceParams, ifaceComponents));
+                        for (int c = 0; c < combos.Count; c++)
+                            method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
+                                deltaTimeParamIndex, entityParamIndex,
+                                concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, driverConcrete, i,
+                                interfaceParams, combos[c]));
                     }
                 };
             }
@@ -208,6 +211,11 @@ namespace EOS.Systems
                     var storages = World.ObjectsStorages.GetByInterface(driverType);
                     if (storages == null) return;
 
+                    // The driver interface may have several implementations on one entity; dedup so
+                    // an entity is considered once (the combination resolver below decides how many
+                    // times Execute actually runs, based on [Each]).
+                    var seen = new HashSet<int>();
+
                     foreach (var storage in storages)
                     {
                         var indexed = storage as IIndexedStorage;
@@ -221,6 +229,7 @@ namespace EOS.Systems
                             if (ChannelVersionAt(indexed, i, driverChannel) <= cursor) continue;
 
                             var entity = indexed.GetOwner(i);
+                            if (!seen.Add(entity.Id)) continue;
 
                             if (!ReactiveConcreteMatch(entity, concreteParams, concreteIndexed,
                                 concreteHasMethods, concreteStorages, -1, cursor)) continue;
@@ -229,13 +238,14 @@ namespace EOS.Systems
                                 includeStorages, includeHasMethods,
                                 excludeStorages, excludeHasMethods)) continue;
 
-                            var ifaceComponents = ResolveInterfaceComponentsReactive(entity, interfaceParams, cursor);
-                            if (ifaceComponents == null) continue;
+                            var combos = ResolveInterfaceCombinationsReactive(entity, interfaceParams, cursor);
+                            if (combos == null) continue;
 
-                            method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
-                                deltaTimeParamIndex, entityParamIndex,
-                                concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, -1, -1,
-                                interfaceParams, ifaceComponents));
+                            for (int c = 0; c < combos.Count; c++)
+                                method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
+                                    deltaTimeParamIndex, entityParamIndex,
+                                    concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, -1, -1,
+                                    interfaceParams, combos[c]));
                         }
                     }
                 };
@@ -277,7 +287,7 @@ namespace EOS.Systems
 
         Action<float, ulong> BuildInterfaceOnlyQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
-            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
@@ -289,6 +299,10 @@ namespace EOS.Systems
                 var pivotStorages = World.ObjectsStorages.GetByInterface(pivotIfaceType);
                 if (pivotStorages == null) return;
 
+                // An entity may show up in several implementation storages of the pivot interface;
+                // dedup so it is visited once and the combination resolver decides the run count.
+                var seen = new HashSet<int>();
+
                 foreach (var storage in pivotStorages)
                 {
                     var indexed = storage as IIndexedStorage;
@@ -299,24 +313,27 @@ namespace EOS.Systems
                         if (!indexed.IsReady(i)) continue;
 
                         var entity = indexed.GetOwner(i);
+                        if (!seen.Add(entity.Id)) continue;
 
                         if (!CheckIncludeExclude(entity,
                             includeStorages, includeHasMethods,
                             excludeStorages, excludeHasMethods)) continue;
 
-                        var ifaceComponents = ResolveInterfaceComponents(entity, interfaceParams);
-                        if (ifaceComponents == null) continue;
+                        var combos = ResolveInterfaceCombinations(entity, interfaceParams);
+                        if (combos == null) continue;
 
-                        var args = new object[parameters.Length];
-                        if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
-                        if (entityParamIndex != -1) args[entityParamIndex] = entity;
+                        for (int c = 0; c < combos.Count; c++)
+                        {
+                            var combo = combos[c];
+                            var args = new object[parameters.Length];
+                            if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+                            if (entityParamIndex != -1) args[entityParamIndex] = entity;
 
-                        int ifaceIdx = 0;
-                        for (int j = 0; j < parameters.Length; j++)
-                            if (parameters[j].ParameterType.IsInterface)
-                                args[j] = ifaceComponents[ifaceIdx++];
+                            for (int j = 0; j < interfaceParams.Count; j++)
+                                args[interfaceParams[j].position] = combo[j];
 
-                        method.Invoke(instance, args);
+                            method.Invoke(instance, args);
+                        }
                     }
                 }
             };
@@ -367,55 +384,136 @@ namespace EOS.Systems
             return true;
         }
 
-        object[] ResolveInterfaceComponents(
+        // Shared single empty combination for queries with no interface parameters: one run, no
+        // interface arguments. Read-only — never mutated by callers.
+        static readonly List<object[]> _emptyCombo = new() { Array.Empty<object>() };
+
+        // Resolves the set of argument combinations for the interface parameters of one entity.
+        // Plain interface params contribute their single first-found implementation; [Each] params
+        // contribute every implementation present. The result is the cartesian product of those, so
+        // Execute runs once per combination. Returns null when a required parameter has no match.
+        List<object[]> ResolveInterfaceCombinations(
             EosEntity entity,
-            List<(int position, Type type, Channel channel, bool optional)> interfaceParams)
+            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams)
         {
-            var result = new object[interfaceParams.Count];
-            for (int j = 0; j < interfaceParams.Count; j++)
+            int n = interfaceParams.Count;
+            if (n == 0) return _emptyCombo;
+
+            var perParam = new List<object>[n];
+            for (int j = 0; j < n; j++)
             {
-                var component = FindInterfaceComponent(entity, interfaceParams[j].type);
-                if (component == null && !interfaceParams[j].optional) return null;
-                result[j] = component;
+                var p = interfaceParams[j];
+                if (p.each)
+                {
+                    var list = new List<object>();
+                    CollectInterfaceComponents(entity, p.type, list);
+                    if (list.Count == 0)
+                    {
+                        if (!p.optional) return null;
+                        list.Add(null);
+                    }
+                    perParam[j] = list;
+                }
+                else
+                {
+                    var component = FindInterfaceComponent(entity, p.type);
+                    if (component == null && !p.optional) return null;
+                    perParam[j] = new List<object>(1) { component };
+                }
+            }
+            return CartesianProduct(perParam);
+        }
+
+        // Reactive counterpart: implementations are filtered by the parameter's channel version so
+        // only ones strictly newer than the cursor qualify.
+        List<object[]> ResolveInterfaceCombinationsReactive(
+            EosEntity entity,
+            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
+            ulong cursor)
+        {
+            int n = interfaceParams.Count;
+            if (n == 0) return _emptyCombo;
+
+            var perParam = new List<object>[n];
+            for (int j = 0; j < n; j++)
+            {
+                var p = interfaceParams[j];
+                if (p.each)
+                {
+                    var list = new List<object>();
+                    CollectInterfaceComponentsReactive(entity, p.type, p.channel, cursor, list);
+                    if (list.Count == 0)
+                    {
+                        if (!p.optional) return null;
+                        list.Add(null);
+                    }
+                    perParam[j] = list;
+                }
+                else
+                {
+                    var component = FindInterfaceComponentReactive(entity, p.type, p.channel, cursor);
+                    if (component == null && !p.optional) return null;
+                    perParam[j] = new List<object>(1) { component };
+                }
+            }
+            return CartesianProduct(perParam);
+        }
+
+        static List<object[]> CartesianProduct(List<object>[] perParam)
+        {
+            int n = perParam.Length;
+            var result = new List<object[]>();
+            var idx = new int[n];
+            while (true)
+            {
+                var combo = new object[n];
+                for (int j = 0; j < n; j++) combo[j] = perParam[j][idx[j]];
+                result.Add(combo);
+
+                int k = n - 1;
+                while (k >= 0)
+                {
+                    idx[k]++;
+                    if (idx[k] < perParam[k].Count) break;
+                    idx[k] = 0;
+                    k--;
+                }
+                if (k < 0) break;
             }
             return result;
         }
 
-        object[] ResolveInterfaceComponentsReactive(
-            EosEntity entity,
-            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
-            ulong cursor)
+        void CollectInterfaceComponents(EosEntity entity, Type interfaceType, List<object> into)
         {
-            var result = new object[interfaceParams.Count];
-            for (int j = 0; j < interfaceParams.Count; j++)
+            var storages = World.ObjectsStorages.GetByInterface(interfaceType);
+            if (storages == null) return;
+
+            for (int s = 0; s < storages.Count; s++)
             {
-                var (position, type, channel, optional) = interfaceParams[j];
-                var storages = World.ObjectsStorages.GetByInterface(type);
-
-                object found = null;
-                if (storages != null)
-                {
-                    foreach (var storage in storages)
-                    {
-                        var indexed = storage as IIndexedStorage;
-                        if (indexed == null) continue;
-                        int idx = indexed.IndexOf(entity);
-                        if (idx < 0) continue;
-                        var component = indexed.GetAt(idx);
-                        if (component == null) continue;
-
-                        if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor)
-                            continue;
-
-                        found = component;
-                        break;
-                    }
-                }
-
-                if (found == null && !optional) return null;
-                result[j] = found;
+                var indexed = storages[s] as IIndexedStorage;
+                if (indexed == null) continue;
+                var component = indexed.TryGetObject(entity);
+                if (component != null) into.Add(component);
             }
-            return result;
+        }
+
+        void CollectInterfaceComponentsReactive(
+            EosEntity entity, Type interfaceType, Channel channel, ulong cursor, List<object> into)
+        {
+            var storages = World.ObjectsStorages.GetByInterface(interfaceType);
+            if (storages == null) return;
+
+            for (int s = 0; s < storages.Count; s++)
+            {
+                var indexed = storages[s] as IIndexedStorage;
+                if (indexed == null) continue;
+                int idx = indexed.IndexOf(entity);
+                if (idx < 0) continue;
+                var component = indexed.GetAt(idx);
+                if (component == null) continue;
+                if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor) continue;
+                into.Add(component);
+            }
         }
 
         object FindInterfaceComponent(EosEntity entity, Type interfaceType)
@@ -433,13 +531,32 @@ namespace EOS.Systems
             return null;
         }
 
+        object FindInterfaceComponentReactive(EosEntity entity, Type interfaceType, Channel channel, ulong cursor)
+        {
+            var storages = World.ObjectsStorages.GetByInterface(interfaceType);
+            if (storages == null) return null;
+
+            for (int s = 0; s < storages.Count; s++)
+            {
+                var indexed = storages[s] as IIndexedStorage;
+                if (indexed == null) continue;
+                int idx = indexed.IndexOf(entity);
+                if (idx < 0) continue;
+                var component = indexed.GetAt(idx);
+                if (component == null) continue;
+                if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor) continue;
+                return component;
+            }
+            return null;
+        }
+
         object[] BuildArgs(
             ParameterInfo[] parameters, EosEntity entity, float deltaTime,
             int deltaTimeParamIndex, int entityParamIndex,
             List<(int position, Type type, Channel channel, bool optional)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods,
             IIndexedStorage[] concreteIndexed, int pivot, int pivotIndex,
-            List<(int position, Type type, Channel channel, bool optional)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             object[] ifaceComponents)
         {
             var args = new object[parameters.Length];

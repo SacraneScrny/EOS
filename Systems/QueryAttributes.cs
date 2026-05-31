@@ -25,5 +25,12 @@ namespace EOS.Systems
     [AttributeUsage(AttributeTargets.Parameter)]
     public sealed class OptionalAttribute : Attribute { }
 
+    // Marks an interface parameter as "iterate every implementation on the entity".
+    // Without it an interface parameter resolves to a single (first-found) implementation
+    // and Execute runs once. With it, Execute runs once per implementation present, and
+    // multiple [Each] parameters expand to the cartesian product of their implementations.
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class EachAttribute : Attribute { }
+
     internal enum Channel : byte { None, New, Bumped }
 }

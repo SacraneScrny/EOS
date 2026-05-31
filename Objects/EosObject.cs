@@ -80,7 +80,8 @@ namespace EOS.Objects
         protected bool Remove<T>() where T : EosObject, new() => Entity.Remove<T>();
 
         // Flags this component on the "Bumped" channel so reactive systems pick it up.
-        // Cheap and idempotent within a window — safe to call every frame.
+        // Cheap and idempotent within an update cycle: repeated calls in the same frame collapse
+        // to a single version stamp, so calling it every frame is safe and never inflates versions.
         protected void Bump()
         {
             if (HasEntity && Entity.IsValid)
