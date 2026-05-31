@@ -39,6 +39,8 @@ namespace EOS.Storage
             int existing = IndexOf(entity);
             if (existing >= 0) return _data[existing];
 
+            World.GuardStructuralChange($"Add<{typeof(T).Name}>");
+
             EnsureData(Count + 1);
             EnsureSparse(entity.Id);
 
@@ -76,6 +78,7 @@ namespace EOS.Storage
         {
             int i = IndexOf(entity);
             if (i < 0) return false;
+            if (!World.GuardStructuralChange($"Remove<{typeof(T).Name}>")) return false;
             var toDispose = _data[i];
             int last = --Count;
 

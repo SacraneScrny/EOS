@@ -38,6 +38,8 @@ namespace EOS.Entities
 
         internal (int Id, ushort Version, string Name) Create(string name, bool active)
         {
+            World.GuardStructuralChange($"Create entity '{name}'");
+
             int id = _free.Count > 0 ? _free.Pop() : _next++;
             EnsureCapacity(id);
 
@@ -69,6 +71,7 @@ namespace EOS.Entities
         public void Destroy(EosEntity entity)
         {
             if (!IsValid(entity)) return;
+            if (!World.GuardStructuralChange($"Destroy entity '{GetName(entity.Id)}'")) return;
             int id = entity.Id;
 
             int index = _aliveIndex[id];
