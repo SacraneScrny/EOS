@@ -56,20 +56,13 @@ namespace EOS.Core
         #region Structural guard
         int _iterationDepth;
 
-        /// <summary>True while systems/objects are iterating and direct structural changes are unsafe.</summary>
         public bool IsIterating => _iterationDepth > 0;
 
-        /// <summary>What to do when a direct structural change is attempted during iteration.</summary>
         public StructuralChangePolicy StructuralChangePolicy { get; set; } = StructuralChangePolicy.Throw;
 
         void BeginIteration() => _iterationDepth++;
         void EndIteration() { if (_iterationDepth > 0) _iterationDepth--; }
 
-        /// <summary>
-        /// Gates a direct structural change. When called during system iteration the configured
-        /// <see cref="StructuralChangePolicy"/> decides whether to throw, warn, or allow it.
-        /// Returns true when the change may proceed.
-        /// </summary>
         internal bool GuardStructuralChange(string operation)
         {
             if (!IsIterating) return true;
