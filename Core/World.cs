@@ -120,6 +120,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            ObjectsStorages.ClearAllRecent();
             _beforeAll.Execute();
             _beforeUpdate.Execute();
             InitializeSystems.Run();

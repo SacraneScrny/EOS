@@ -15,4 +15,8 @@ namespace EOS.Systems
         public readonly Type[] Types;
         public IncludeAttribute(params Type[] types) => Types = types;
     }
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class OnlyNewAttribute : Attribute { }
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class OptionalAttribute : Attribute { }
 }

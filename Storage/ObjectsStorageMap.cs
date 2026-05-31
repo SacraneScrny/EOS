@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-
 using EOS.Core;
 using EOS.Entities;
 using EOS.Objects;
@@ -42,6 +41,17 @@ namespace EOS.Storage
         {
             _byInterface.TryGetValue(interfaceType, out var result);
             return result;
+        }
+
+        internal void MarkReady(EosObject obj)
+        {
+            if (_map.TryGetValue(obj.GetType(), out var storage))
+                (storage as IIndexedStorage)?.MarkReady(obj.Entity);
+        }
+        internal void ClearAllRecent()
+        {
+            foreach (var storage in _map.Values)
+                storage.ClearRecent();
         }
 
         internal void DestroyEntity(EosEntity entity)

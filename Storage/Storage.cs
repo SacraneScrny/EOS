@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-
 using EOS.Core;
 using EOS.Entities;
 using EOS.Objects;
@@ -14,9 +13,11 @@ namespace EOS.Storage
         int[] _owners = new int[1024];
         ushort[] _ownerVersions = new ushort[1024];
         readonly Dictionary<ulong, int> _index = new();
+        readonly List<int> _recentlyAdded = new();
 
         public int Count { get; private set; }
         public ReadOnlySpan<T> All => _data.AsSpan(0, Count);
+        public IReadOnlyList<int> RecentlyAdded => _recentlyAdded;
 
         static ulong Key(EosEntity entity) => ((ulong)entity.Version << 32) | (uint)entity.Id;
 
@@ -72,7 +73,7 @@ namespace EOS.Storage
             }
 
             _index.Remove(key);
-            toDispose.Dispose(); 
+            toDispose.Dispose();
             _data[last] = null;
             _owners[last] = 0;
             _ownerVersions[last] = 0;
@@ -81,6 +82,7 @@ namespace EOS.Storage
         }
 
         public void RemoveEntity(EosEntity entity) => Remove(entity);
+
         public void Clear()
         {
             _data = new T[1024];
@@ -88,12 +90,22 @@ namespace EOS.Storage
             _ownerVersions = new ushort[1024];
             _index.Clear();
             Count = 0;
+            _recentlyAdded.Clear();
         }
-        
+
+        public void ClearRecent() => _recentlyAdded.Clear();
+
+        public bool IsReady(int index) => _data[index] != null && _data[index].IsEnabled;
+
+        public void MarkReady(EosEntity entity)
+        {
+            if (_index.TryGetValue(Key(entity), out var i))
+                _recentlyAdded.Add(i);
+        }
+
         object IIndexedStorage.GetAt(int index) => _data[index];
         object IIndexedStorage.TryGetObject(EosEntity entity)
             => TryGet(entity, out var result) ? result : null;
-    
         EosEntity IIndexedStorage.GetOwner(int index) => GetOwner(index);
         int IIndexedStorage.Count => Count;
     }

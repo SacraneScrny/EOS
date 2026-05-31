@@ -1,4 +1,6 @@
-﻿using EOS.Entities;
+﻿using System.Collections.Generic;
+
+using EOS.Entities;
 
 namespace EOS.Storage
 {
@@ -8,5 +10,8 @@ namespace EOS.Storage
         EosEntity GetOwner(int index);
         object GetAt(int index);
         object TryGetObject(EosEntity entity);
+        bool IsReady(int index);
+        void MarkReady(EosEntity entity);
+        IReadOnlyList<int> RecentlyAdded { get; }
     }
 }

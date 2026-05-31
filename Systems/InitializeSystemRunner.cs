@@ -36,6 +36,7 @@ namespace EOS.Systems
             {
                 var obj = _batch[i];
                 obj.Start();
+                World.ObjectsStorages.MarkReady(obj);
                 World.Objects.MarkInitialized(obj);
             }
         }
