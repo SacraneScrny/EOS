@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using EOS.Core;
 using EOS.Entities;
+using EOS.Logging;
 using EOS.Objects;
 using EOS.Storage;
 
@@ -43,7 +44,10 @@ namespace EOS.Systems
                 else if (typeof(EosObject).IsAssignableFrom(p.ParameterType))
                     concreteParams.Add((p.Position, p.ParameterType, channel, optional));
                 else
+                {
+                    EosLog.Error($"Unsupported parameter type {p.ParameterType.Name} in {instance.GetType().Name}.{method.Name}", nameof(SystemsRunner));
                     throw new Exception($"Unsupported parameter type {p.ParameterType.Name} in {method.Name}");
+                }
             }
 
             bool isReactive = concreteParams.Any(p => p.channel != Channel.None)

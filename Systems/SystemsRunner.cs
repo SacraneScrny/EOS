@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using EOS.Core;
+using EOS.Logging;
 using EOS.Systems.Groups;
 
 namespace EOS.Systems
@@ -48,11 +49,23 @@ namespace EOS.Systems
 
             foreach (var type in types)
             {
-                var instance = (EosSystem)Activator.CreateInstance(type);
+                EosSystem instance;
+                try
+                {
+                    instance = (EosSystem)Activator.CreateInstance(type);
+                }
+                catch (Exception ex)
+                {
+                    EosLog.Error($"Failed to instantiate {type.Name}: {ex.Message}", nameof(SystemsRunner));
+                    continue;
+                }
+
                 instance.SetWorld(World);
                 _all.Add(instance);
                 _typeToSystem[type] = instance;
-                instance.Awake();
+
+                try { instance.Awake(); }
+                catch (Exception ex) { EosLog.Error($"{type.Name}.Awake threw: {ex.Message}", nameof(SystemsRunner)); }
 
                 var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .Where(m => m.Name == EXECUTE_METHOD);
@@ -87,7 +100,10 @@ namespace EOS.Systems
             TopologicalSort(_lateUpdate);
 
             foreach (var system in _all)
-                system.Start();
+            {
+                try { system.Start(); }
+                catch (Exception ex) { EosLog.Error($"{system.GetType().Name}.Start threw: {ex.Message}", nameof(SystemsRunner)); }
+            }
         }
 
         internal void Update(float deltaTime) => Run(_update, deltaTime);
@@ -99,17 +115,23 @@ namespace EOS.Systems
             for (int i = 0; i < systems.Count; i++)
             {
                 var entry = systems[i];
-
-                if (entry.Reactive)
+                try
                 {
-                    ulong now = World.Version;
-                    if (entry.IsUpdate())
-                        entry.Body(deltaTime, entry.Cursor);
-                    entry.Cursor = now;
+                    if (entry.Reactive)
+                    {
+                        ulong now = World.Version;
+                        if (entry.IsUpdate())
+                            entry.Body(deltaTime, entry.Cursor);
+                        entry.Cursor = now;
+                    }
+                    else if (entry.IsUpdate())
+                    {
+                        entry.Body(deltaTime, 0UL);
+                    }
                 }
-                else if (entry.IsUpdate())
+                catch (Exception ex)
                 {
-                    entry.Body(deltaTime, 0UL);
+                    EosLog.Error($"{entry.Type.Name}.Execute threw: {ex.InnerException?.Message ?? ex.Message}", nameof(SystemsRunner));
                 }
             }
         }
@@ -171,7 +193,10 @@ namespace EOS.Systems
             }
 
             if (result.Count != n)
+            {
+                EosLog.Error("Cycle detected in EosSystem update order", nameof(SystemsRunner));
                 throw new Exception("Cycle detected in EosSystem update order");
+            }
 
             systems.Clear();
             systems.AddRange(result);

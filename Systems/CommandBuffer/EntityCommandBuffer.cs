@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using EOS.Core;
 using EOS.Entities;
+using EOS.Logging;
 
 namespace EOS.Systems.CommandBuffer
 {
@@ -57,7 +58,10 @@ namespace EOS.Systems.CommandBuffer
                     deferred.Value = new EosEntity(_world, name, true);
                     deferred.IsResolved = true;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    EosLog.Error($"Failed to create entity '{name}': {ex.Message}", nameof(EntityCommandBuffer));
+                }
             }
 
             for (int i = 0; i < _batches.Count; i++)
@@ -90,7 +94,11 @@ namespace EOS.Systems.CommandBuffer
             for (int j = 0; j < ops.Count; j++)
             {
                 try { if (!ops[j](entity)) break; }
-                catch { break; }
+                catch (Exception ex)
+                {
+                    EosLog.Error($"Op failed on entity {entity}: {ex.Message}", nameof(EntityCommandBuffer));
+                    break;
+                }
             }
         }
     }
