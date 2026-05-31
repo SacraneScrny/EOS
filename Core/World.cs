@@ -14,15 +14,15 @@ namespace EOS.Core
         bool IsDisposed { get; }
         bool IsEnabled { get; }
         bool IsManualUpdate { get; }
-        
+
         EntitiesContainer Entities { get; }
         ObjectsContainer Objects { get; }
         SystemsRunner Systems { get; }
-        
+
         ObjectsStorageMap ObjectsStorages { get; }
         SystemGroups SystemGroups { get; }
         InitializeSystemRunner InitializeSystems { get; }
-        
+
         IReadOnlyEntityCommandBuffer BeforeAll { get; }
         IReadOnlyEntityCommandBuffer BeforeUpdate { get; }
         IReadOnlyEntityCommandBuffer AfterUpdate { get; }
@@ -32,12 +32,12 @@ namespace EOS.Core
         IReadOnlyEntityCommandBuffer AfterLateUpdate { get; }
         IReadOnlyEntityCommandBuffer AfterAll { get; }
     }
-    
+
     public class World : IDisposable, IReadOnlyWorld, IEquatable<World>
     {
         public int Id { get; private set; } = -1;
         internal void SetId(int id) => Id = id;
-        
+
         public bool IsDisposed { get; private set; }
         public bool IsEnabled { get; private set; }
         public bool IsManualUpdate { get; set; }
@@ -46,10 +46,14 @@ namespace EOS.Core
         public ulong Version => _version;
         internal ulong NextVersion() => ++_version;
 
+        ulong _frame;
+        public ulong Frame => _frame;
+        internal ulong NextFrame() => ++_frame;
+
         public EntitiesContainer Entities { get; } = new();
         public ObjectsContainer Objects { get; } = new();
         public SystemsRunner Systems { get; } = new();
-        
+
         public ObjectsStorageMap ObjectsStorages { get; } = new();
         public SystemGroups SystemGroups { get; } = new();
         public InitializeSystemRunner InitializeSystems { get; } = new();
@@ -57,25 +61,25 @@ namespace EOS.Core
         #region ECB
         EntityCommandBuffer _beforeAll;
         public IReadOnlyEntityCommandBuffer BeforeAll => _beforeAll;
-        
+
         EntityCommandBuffer _beforeUpdate;
         public IReadOnlyEntityCommandBuffer BeforeUpdate => _beforeUpdate;
-        
+
         EntityCommandBuffer _afterUpdate;
         public IReadOnlyEntityCommandBuffer AfterUpdate => _afterUpdate;
-        
+
         EntityCommandBuffer _beforeFixedUpdate;
         public IReadOnlyEntityCommandBuffer BeforeFixedUpdate => _beforeFixedUpdate;
-        
+
         EntityCommandBuffer _afterFixedUpdate;
         public IReadOnlyEntityCommandBuffer AfterFixedUpdate => _afterFixedUpdate;
-        
+
         EntityCommandBuffer _beforeLateUpdate;
         public IReadOnlyEntityCommandBuffer BeforeLateUpdate => _beforeLateUpdate;
-        
+
         EntityCommandBuffer _afterLateUpdate;
         public IReadOnlyEntityCommandBuffer AfterLateUpdate => _afterLateUpdate;
-        
+
         EntityCommandBuffer _afterAll;
         public IReadOnlyEntityCommandBuffer AfterAll => _afterAll;
         #endregion
@@ -92,7 +96,7 @@ namespace EOS.Core
             _beforeLateUpdate.Clear();
             _afterLateUpdate.Clear();
             _afterAll.Clear();
-            
+
             ObjectsStorages.Reset();
             SystemGroups.Reset();
             Entities.Reset();
@@ -109,21 +113,22 @@ namespace EOS.Core
             _beforeLateUpdate = new(this);
             _afterLateUpdate = new(this);
             _afterAll = new(this);
-            
+
             ObjectsStorages.Init(this);
             SystemGroups.Init(this);
             InitializeSystems.Init(this);
             Objects.Init(this);
             Entities.Init(this);
             Systems.Init(this);
-            
+
             IsEnabled = true;
         }
-        
+
         public void Update(float deltaTime)
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            NextFrame();
             _beforeAll.Execute();
             _beforeUpdate.Execute();
             InitializeSystems.Run();
@@ -135,6 +140,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            NextFrame();
             _beforeFixedUpdate.Execute();
             Systems.FixedUpdate(deltaTime);
             Objects.FixedUpdate(deltaTime);
@@ -144,19 +150,20 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            NextFrame();
             _beforeLateUpdate.Execute();
             Systems.LateUpdate(deltaTime);
             Objects.LateUpdate(deltaTime);
             _afterLateUpdate.Execute();
             _afterAll.Execute();
         }
-        
+
         public void Dispose()
         {
             if (IsDisposed) return;
             IsDisposed = true;
         }
-        
+
         public bool Equals(World other)
         {
             if (other is null) return false;

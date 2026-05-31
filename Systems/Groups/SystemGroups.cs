@@ -23,7 +23,7 @@ namespace EOS.Systems.Groups
                 Register(baseType);
             }
         }
-        
+
         public void SetEnabled(Type groupType, bool enabled) => _enabled[groupType] = enabled;
         public void Enable<T>() where T : SystemGroup => SetEnabled(typeof(T), true);
         public void Disable<T>() where T : SystemGroup => SetEnabled(typeof(T), false);

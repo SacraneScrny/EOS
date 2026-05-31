@@ -13,6 +13,7 @@ namespace EOS.Storage
         ushort[] _ownerVersions = new ushort[1024];
         ulong[] _addVersion = new ulong[1024];
         ulong[] _markVersion = new ulong[1024];
+        ulong[] _markFrame = new ulong[1024];
         int[] _sparse = new int[1024];
 
         public int Count { get; private set; }
@@ -46,6 +47,7 @@ namespace EOS.Storage
             _ownerVersions[i] = entity.Version;
             _addVersion[i] = 0;
             _markVersion[i] = 0;
+            _markFrame[i] = 0;
             _sparse[entity.Id] = i;
             _data[i] = new T();
             _data[i].SetupObject(entity);
@@ -84,6 +86,7 @@ namespace EOS.Storage
                 _ownerVersions[i] = _ownerVersions[last];
                 _addVersion[i] = _addVersion[last];
                 _markVersion[i] = _markVersion[last];
+                _markFrame[i] = _markFrame[last];
                 _sparse[_owners[i]] = i;
             }
 
@@ -93,6 +96,7 @@ namespace EOS.Storage
             _ownerVersions[last] = 0;
             _addVersion[last] = 0;
             _markVersion[last] = 0;
+            _markFrame[last] = 0;
 
             World.ObjectsStorages.UntrackEntity(entity, this);
             return true;
@@ -114,6 +118,7 @@ namespace EOS.Storage
             Array.Clear(_ownerVersions, 0, count);
             Array.Clear(_addVersion, 0, count);
             Array.Clear(_markVersion, 0, count);
+            Array.Clear(_markFrame, 0, count);
             Count = 0;
             MaxAddVersion = 0;
             MaxMarkVersion = 0;
@@ -121,7 +126,6 @@ namespace EOS.Storage
 
         public bool IsReady(int index) => _data[index] != null && _data[index].IsEnabled;
 
-        // "New" channel — stamped once when the object becomes ready (init).
         public void MarkReady(EosEntity entity)
         {
             int i = IndexOf(entity);
@@ -130,12 +134,14 @@ namespace EOS.Storage
             MaxAddVersion = _addVersion[i];
         }
 
-        // "Bumped" channel — stamped on demand by user code after important changes.
         public void Bump(EosEntity entity)
         {
             int i = IndexOf(entity);
             if (i < 0) return;
+            ulong frame = World.Frame;
+            if (_markVersion[i] != 0 && _markFrame[i] == frame) return;
             _markVersion[i] = World.NextVersion();
+            _markFrame[i] = frame;
             MaxMarkVersion = _markVersion[i];
         }
 
@@ -149,6 +155,7 @@ namespace EOS.Storage
             Array.Resize(ref _ownerVersions, n);
             Array.Resize(ref _addVersion, n);
             Array.Resize(ref _markVersion, n);
+            Array.Resize(ref _markFrame, n);
         }
         void EnsureSparse(int id)
         {

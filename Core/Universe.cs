@@ -6,15 +6,15 @@ namespace EOS.Core
     {
         static int _nextId = 0;
         public static bool IsEnabled { get; private set; }
-        
+
         static World _defaultWorld;
         public static IReadOnlyWorld DefaultWorld => _defaultWorld;
-        
+
         static readonly List<World> _otherWorlds = new List<World>();
         public static IReadOnlyList<IReadOnlyWorld> OtherWorlds => _otherWorlds;
-        
+
         public static int TotalWorldsCount => 1 + _otherWorlds.Count;
-        
+
         public static void Boot()
         {
             _defaultWorld?.Dispose();
@@ -49,14 +49,14 @@ namespace EOS.Core
             world.Dispose();
             return true;
         }
-        
+
         public static void Update(float deltaTime)
         {
             if (!IsEnabled) return;
             if (!_defaultWorld.IsManualUpdate)
                 _defaultWorld.Update(deltaTime);
-            
-            foreach (var world in _otherWorlds) 
+
+            foreach (var world in _otherWorlds)
                 if (!world.IsManualUpdate)
                     world.Update(deltaTime);
         }
@@ -65,8 +65,8 @@ namespace EOS.Core
             if (!IsEnabled) return;
             if (!_defaultWorld.IsManualUpdate)
                 _defaultWorld.FixedUpdate(deltaTime);
-            
-            foreach (var world in _otherWorlds) 
+
+            foreach (var world in _otherWorlds)
                 if (!world.IsManualUpdate)
                     world.FixedUpdate(deltaTime);
         }
@@ -75,12 +75,12 @@ namespace EOS.Core
             if (!IsEnabled) return;
             if (!_defaultWorld.IsManualUpdate)
                 _defaultWorld.LateUpdate(deltaTime);
-            
-            foreach (var world in _otherWorlds) 
+
+            foreach (var world in _otherWorlds)
                 if (!world.IsManualUpdate)
                     world.LateUpdate(deltaTime);
         }
-        
+
         public static void On() => IsEnabled = true;
         public static void Off() => IsEnabled = false;
     }

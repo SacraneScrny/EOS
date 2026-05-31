@@ -79,8 +79,6 @@ namespace EOS.Objects
         protected bool Has<T>() where T : EosObject, new() => Entity.Has<T>();
         protected bool Remove<T>() where T : EosObject, new() => Entity.Remove<T>();
 
-        // Flags this component on the "Bumped" channel so reactive systems pick it up.
-        // Cheap and idempotent within a window — safe to call every frame.
         protected void Bump()
         {
             if (HasEntity && Entity.IsValid)

@@ -25,5 +25,8 @@ namespace EOS.Systems
     [AttributeUsage(AttributeTargets.Parameter)]
     public sealed class OptionalAttribute : Attribute { }
 
+    [AttributeUsage(AttributeTargets.Parameter)]
+    public sealed class EachAttribute : Attribute { }
+
     internal enum Channel : byte { None, New, Bumped }
 }
