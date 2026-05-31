@@ -8,18 +8,13 @@ namespace EOS.Systems
 {
     public partial class SystemsRunner
     {
-        // A node in the ordering tree. It is either a leaf (all entries that share a single
-        // system type) or a group (a SystemGroup type holding child nodes). UpdateAfter /
-        // UpdateBefore are resolved between siblings of the same level, so groups are ordered
-        // relative to each other the same way individual systems are, and the ordering applies
-        // recursively to nested groups.
         sealed class SortNode
         {
-            public Type Key;                                   // system type (leaf) or SystemGroup type (group)
+            public Type Key;
             public bool IsGroup;
-            public readonly List<SystemEntry> Entries = new(); // leaf only
-            public readonly List<SortNode> Children = new();   // group only
-            public HashSet<Type> Subtree;                      // every Key contained in this node's subtree
+            public readonly List<SystemEntry> Entries = new();
+            public readonly List<SortNode> Children = new();
+            public HashSet<Type> Subtree;
         }
 
         void TopologicalSort(List<SystemEntry> systems)
@@ -73,8 +68,6 @@ namespace EOS.Systems
             return root;
         }
 
-        // Mirrors SystemGroups.Register: a group nests under its base type when that base is itself
-        // a concrete SystemGroup (not the SystemGroup root), otherwise it sits at the top level.
         static Type ParentGroupOf(Type groupType)
         {
             var baseType = groupType.BaseType;
@@ -105,11 +98,6 @@ namespace EOS.Systems
                     SortLevel(node.Children);
         }
 
-        // Topological sort of a single level of siblings using UpdateAfter / UpdateBefore.
-        // A target type matches the sibling whose subtree contains it, so a constraint that points
-        // at a system buried inside a sibling group orders the whole sibling group. Ties are broken
-        // deterministically by type name so siblings without explicit ordering no longer run in a
-        // random (reflection-dependent) order.
         void OrderSiblings(List<SortNode> nodes)
         {
             int n = nodes.Count;
@@ -118,7 +106,7 @@ namespace EOS.Systems
             var typeToSibling = new Dictionary<Type, int>();
             for (int i = 0; i < n; i++)
                 foreach (var type in nodes[i].Subtree)
-                    typeToSibling[type] = i; // sibling subtrees are disjoint, so no conflict
+                    typeToSibling[type] = i;
 
             var adj = new List<int>[n];
             var inDegree = new int[n];
