@@ -126,7 +126,6 @@ namespace EOS.Storage
 
         public bool IsReady(int index) => _data[index] != null && _data[index].IsEnabled;
 
-        // "New" channel — stamped once when the object becomes ready (init).
         public void MarkReady(EosEntity entity)
         {
             int i = IndexOf(entity);
@@ -135,10 +134,6 @@ namespace EOS.Storage
             MaxAddVersion = _addVersion[i];
         }
 
-        // "Bumped" channel — stamped on demand by user code after important changes.
-        // Coalesced within an update cycle: repeated bumps in the same World.Frame reuse the
-        // first stamp instead of advancing the version clock, so calling Bump() every frame is
-        // cheap and does not inflate versions. A reactive system still observes the entity once.
         public void Bump(EosEntity entity)
         {
             int i = IndexOf(entity);

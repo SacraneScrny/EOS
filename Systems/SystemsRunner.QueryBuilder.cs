@@ -17,11 +17,6 @@ namespace EOS.Systems
         const string GET_OWNER = "GetOwner";
         const string COUNT = "Count";
 
-        // Builds the query body for one Execute method. The body is a pure iteration of the
-        // form (deltaTime, cursor) => run-once-per-matching-entity. It carries NO scheduling
-        // policy: the runner decides when to call it (IsUpdate) and what cursor to pass.
-        // For non-reactive queries the cursor is ignored; for reactive ([New]/[Bumped]) ones
-        // only entities whose channel version is strictly newer than the cursor are visited.
         (Action<float, ulong> body, bool reactive) BuildQuery(object instance, MethodInfo method)
         {
             var parameters = method.GetParameters();
@@ -151,8 +146,6 @@ namespace EOS.Systems
             };
         }
 
-        // Reactive query body: visit only entities whose driver channel version is newer than
-        // `cursor`. No gating, no cursor bookkeeping here — that is entirely the runner's job.
         Action<float, ulong> BuildReactiveQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
             List<(int position, Type type, Channel channel, bool optional)> concreteParams,
@@ -211,9 +204,6 @@ namespace EOS.Systems
                     var storages = World.ObjectsStorages.GetByInterface(driverType);
                     if (storages == null) return;
 
-                    // The driver interface may have several implementations on one entity; dedup so
-                    // an entity is considered once (the combination resolver below decides how many
-                    // times Execute actually runs, based on [Each]).
                     var seen = new HashSet<int>();
 
                     foreach (var storage in storages)
@@ -299,8 +289,6 @@ namespace EOS.Systems
                 var pivotStorages = World.ObjectsStorages.GetByInterface(pivotIfaceType);
                 if (pivotStorages == null) return;
 
-                // An entity may show up in several implementation storages of the pivot interface;
-                // dedup so it is visited once and the combination resolver decides the run count.
                 var seen = new HashSet<int>();
 
                 foreach (var storage in pivotStorages)
@@ -339,7 +327,6 @@ namespace EOS.Systems
             };
         }
 
-        // -------------------------------------------------------------------
 
         static ulong ChannelVersionAt(IIndexedStorage storage, int index, Channel channel)
             => channel == Channel.Bumped ? storage.MarkVersionAt(index) : storage.AddVersionAt(index);
@@ -347,11 +334,6 @@ namespace EOS.Systems
         static ulong ChannelMax(IIndexedStorage storage, Channel channel)
             => channel == Channel.Bumped ? storage.MaxMarkVersion : storage.MaxAddVersion;
 
-        // Validates concrete parameters other than the driver:
-        //  - reactive (New/Bumped): must be present AND have a version newer than the cursor
-        //  - required non-reactive: must be present
-        //  - optional non-reactive: no constraint
-        //  - optional reactive: absent is fine, but present-yet-stale fails the match
         bool ReactiveConcreteMatch(
             EosEntity entity,
             List<(int position, Type type, Channel channel, bool optional)> concreteParams,
@@ -384,14 +366,8 @@ namespace EOS.Systems
             return true;
         }
 
-        // Shared single empty combination for queries with no interface parameters: one run, no
-        // interface arguments. Read-only — never mutated by callers.
         static readonly List<object[]> _emptyCombo = new() { Array.Empty<object>() };
 
-        // Resolves the set of argument combinations for the interface parameters of one entity.
-        // Plain interface params contribute their single first-found implementation; [Each] params
-        // contribute every implementation present. The result is the cartesian product of those, so
-        // Execute runs once per combination. Returns null when a required parameter has no match.
         List<object[]> ResolveInterfaceCombinations(
             EosEntity entity,
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams)
@@ -424,8 +400,6 @@ namespace EOS.Systems
             return CartesianProduct(perParam);
         }
 
-        // Reactive counterpart: implementations are filtered by the parameter's channel version so
-        // only ones strictly newer than the cursor qualify.
         List<object[]> ResolveInterfaceCombinationsReactive(
             EosEntity entity,
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
@@ -579,7 +553,6 @@ namespace EOS.Systems
             return args;
         }
 
-        // -------------------------------------------------------------------
 
         bool CheckFilters(
             EosEntity entity,

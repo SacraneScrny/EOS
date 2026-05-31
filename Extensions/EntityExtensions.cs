@@ -17,7 +17,7 @@ namespace EOS.Extensions
             result = null;
             return entity.IsValid && entity.World.ObjectsStorages.Get<T>().TryGet(entity, out result);
         }
-        
+
         public static bool Has<T>(this EosEntity entity) where T : EosObject, new()
             => entity.IsValid && entity.World.ObjectsStorages.Get<T>().Has(entity);
 

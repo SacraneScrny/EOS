@@ -18,7 +18,7 @@ namespace EOS.Systems.CommandBuffer
     {
         readonly World _world;
         public EntityCommandBuffer(World world) => _world = world;
-        
+
         readonly List<(string name, DeferredEntity deferred)> _creates = new();
         readonly List<(EosEntity entity, List<Func<EosEntity, bool>> ops)> _batches = new();
         readonly List<(DeferredEntity deferred, List<Func<EosEntity, bool>> ops)> _deferredBatches = new();
