@@ -1,6 +1,7 @@
 using System;
 
 using EOS.Entities;
+using EOS.Logging;
 using EOS.Objects;
 using EOS.Storage;
 using EOS.Systems;
@@ -14,6 +15,8 @@ namespace EOS.Core
         bool IsDisposed { get; }
         bool IsEnabled { get; }
         bool IsManualUpdate { get; }
+
+        bool IsIterating { get; }
 
         EntitiesContainer Entities { get; }
         ObjectsContainer Objects { get; }
@@ -49,6 +52,44 @@ namespace EOS.Core
         ulong _frame;
         public ulong Frame => _frame;
         internal ulong NextFrame() => ++_frame;
+
+        #region Structural guard
+        int _iterationDepth;
+
+        /// <summary>True while systems/objects are iterating and direct structural changes are unsafe.</summary>
+        public bool IsIterating => _iterationDepth > 0;
+
+        /// <summary>What to do when a direct structural change is attempted during iteration.</summary>
+        public StructuralChangePolicy StructuralChangePolicy { get; set; } = StructuralChangePolicy.Throw;
+
+        void BeginIteration() => _iterationDepth++;
+        void EndIteration() { if (_iterationDepth > 0) _iterationDepth--; }
+
+        /// <summary>
+        /// Gates a direct structural change. When called during system iteration the configured
+        /// <see cref="StructuralChangePolicy"/> decides whether to throw, warn, or allow it.
+        /// Returns true when the change may proceed.
+        /// </summary>
+        internal bool GuardStructuralChange(string operation)
+        {
+            if (!IsIterating) return true;
+            switch (StructuralChangePolicy)
+            {
+                case StructuralChangePolicy.Allow:
+                    return true;
+                case StructuralChangePolicy.Warn:
+                    EosLog.Warning(
+                        $"Structural change '{operation}' performed during system iteration. " +
+                        "Use an EntityCommandBuffer (e.g. World.AfterUpdate) to defer it.",
+                        nameof(World));
+                    return true;
+                default:
+                    throw new InvalidOperationException(
+                        $"Structural change '{operation}' is not allowed during system iteration. " +
+                        "Use an EntityCommandBuffer (e.g. World.AfterUpdate) to defer it.");
+            }
+        }
+        #endregion
 
         public EntitiesContainer Entities { get; } = new();
         public ObjectsContainer Objects { get; } = new();
@@ -132,8 +173,13 @@ namespace EOS.Core
             _beforeAll.Execute();
             _beforeUpdate.Execute();
             InitializeSystems.Run();
-            Systems.Update(deltaTime);
-            Objects.Update(deltaTime);
+            BeginIteration();
+            try
+            {
+                Systems.Update(deltaTime);
+                Objects.Update(deltaTime);
+            }
+            finally { EndIteration(); }
             _afterUpdate.Execute();
         }
         public void FixedUpdate(float deltaTime)
@@ -142,8 +188,13 @@ namespace EOS.Core
             if (!IsEnabled) return;
             NextFrame();
             _beforeFixedUpdate.Execute();
-            Systems.FixedUpdate(deltaTime);
-            Objects.FixedUpdate(deltaTime);
+            BeginIteration();
+            try
+            {
+                Systems.FixedUpdate(deltaTime);
+                Objects.FixedUpdate(deltaTime);
+            }
+            finally { EndIteration(); }
             _afterFixedUpdate.Execute();
         }
         public void LateUpdate(float deltaTime)
@@ -152,8 +203,13 @@ namespace EOS.Core
             if (!IsEnabled) return;
             NextFrame();
             _beforeLateUpdate.Execute();
-            Systems.LateUpdate(deltaTime);
-            Objects.LateUpdate(deltaTime);
+            BeginIteration();
+            try
+            {
+                Systems.LateUpdate(deltaTime);
+                Objects.LateUpdate(deltaTime);
+            }
+            finally { EndIteration(); }
             _afterLateUpdate.Execute();
             _afterAll.Execute();
         }
