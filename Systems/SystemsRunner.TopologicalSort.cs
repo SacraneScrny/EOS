@@ -68,6 +68,12 @@ namespace EOS.Systems
             return root;
         }
 
+        static int OrderOf(Type key)
+        {
+            var attr = key.GetCustomAttribute<UpdateOrderAttribute>();
+            return attr?.Order ?? 0;
+        }
+
         static Type ParentGroupOf(Type groupType)
         {
             var baseType = groupType.BaseType;
@@ -133,12 +139,18 @@ namespace EOS.Systems
             }
 
             var names = new string[n];
+            var orders = new int[n];
             for (int i = 0; i < n; i++)
+            {
                 names[i] = nodes[i].Key.FullName ?? nodes[i].Key.Name;
+                orders[i] = OrderOf(nodes[i].Key);
+            }
 
             var ready = new SortedSet<int>(Comparer<int>.Create((a, b) =>
             {
-                int c = string.CompareOrdinal(names[a], names[b]);
+                int c = orders[a].CompareTo(orders[b]);
+                if (c != 0) return c;
+                c = string.CompareOrdinal(names[a], names[b]);
                 return c != 0 ? c : a.CompareTo(b);
             }));
 
