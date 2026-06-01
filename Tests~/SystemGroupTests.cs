@@ -80,5 +80,20 @@ namespace EOS.Tests
 
             Assert.Equal(0, e.Get<HierProbe>().Count);
         }
+
+        [Fact]
+        public void SystemGroupInstance_EnableDisableViaWorld()
+        {
+            var world = NewWorld();
+            var group = new GroupTestGroup();
+
+            Assert.True(group.IsEnabled(world));
+
+            group.Disable(world);
+            Assert.False(group.IsEnabled(world));
+
+            group.Enable(world);
+            Assert.True(group.IsEnabled(world));
+        }
     }
 }

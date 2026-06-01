@@ -1,3 +1,5 @@
+using System;
+
 using EOS.Core;
 using EOS.Entities;
 using EOS.Extensions;
@@ -7,6 +9,19 @@ using Xunit;
 
 namespace EOS.Tests
 {
+    public sealed class TrackedDisposable : IDisposable
+    {
+        public bool Disposed;
+        public void Dispose() => Disposed = true;
+    }
+
+    public sealed class TracingProbe : EosObject
+    {
+        public readonly TrackedDisposable First = new();
+        public readonly TrackedDisposable Second = new();
+        protected override void OnAwake() => Trace(First, Second);
+    }
+
     public sealed class LifecycleProbe : EosObject
     {
         public int Awakes;
@@ -102,6 +117,20 @@ namespace EOS.Tests
             Assert.Equal(1, probe.Updates);
             Assert.Equal(1, probe.FixedUpdates);
             Assert.Equal(1, probe.LateUpdates);
+        }
+
+        [Fact]
+        public void TracedDisposables_AreDisposedWithObject()
+        {
+            var world = NewWorld();
+            var e = new EosEntity(world, "e", true);
+            var probe = e.Add<TracingProbe>();
+            world.Update(0f);
+
+            e.Remove<TracingProbe>();
+
+            Assert.True(probe.First.Disposed);
+            Assert.True(probe.Second.Disposed);
         }
     }
 }

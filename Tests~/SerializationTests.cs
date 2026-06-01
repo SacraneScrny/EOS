@@ -6,6 +6,7 @@ using EOS.Extensions;
 using EOS.Loader;
 using EOS.Objects;
 using EOS.Serialization;
+using EOS.Serialization.Snapshot;
 using Xunit;
 
 namespace EOS.Tests
@@ -103,6 +104,45 @@ namespace EOS.Tests
             var snapshot = WorldSerializer.Capture();
 
             Assert.DoesNotContain(snapshot.Worlds, ws => ws.WorldKey == "hidden");
+        }
+
+        [Fact]
+        public void Restore_Null_IsSafe()
+        {
+            WorldSerializer.Restore(null);
+        }
+
+        [Fact]
+        public void Restore_SkipsUnknownTypeAndUnmappedRecords()
+        {
+            EosDomainReset.Reset();
+            Universe.Boot();
+
+            var snapshot = new UniverseSnapshot();
+            var ws = new WorldSnapshot { WorldKey = null };
+            ws.Entities.Add(new EntityRecord { LocalId = 0, Name = "e", Active = true, StableKey = "e" });
+            ws.Components.Add(new ComponentBag
+            {
+                TypeName = "Totally.Missing.Type, NoSuchAssembly",
+                Items = { new ComponentRecord { EntityLocalId = 0 } }
+            });
+            ws.Components.Add(new ComponentBag
+            {
+                TypeName = typeof(SerComp).AssemblyQualifiedName,
+                Items =
+                {
+                    new ComponentRecord { EntityLocalId = 0, Data = 5 },
+                    new ComponentRecord { EntityLocalId = 999, Data = 1 }
+                }
+            });
+            snapshot.Worlds.Add(ws);
+
+            WorldSerializer.Restore(snapshot);
+            var world = Universe.InternalDefaultWorld;
+
+            Assert.True(world.Entities.TryFind("e", out var e));
+            Assert.Equal(5, e.Get<SerComp>().Hp);
+            Assert.Equal(1, world.Entities.AliveCount);
         }
     }
 }

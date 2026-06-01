@@ -12,6 +12,18 @@ namespace EOS.Tests
 {
     public sealed class OrderProbe : EosObject { public readonly List<string> Log = new(); }
     public sealed class OrderNumProbe : EosObject { public readonly List<string> Log = new(); }
+    public sealed class OrderBeforeProbe : EosObject { public readonly List<string> Log = new(); }
+
+    public sealed class OrderTarget : EosSystem
+    {
+        void Execute(OrderBeforeProbe p) => p.Log.Add("target");
+    }
+
+    [UpdateBefore(typeof(OrderTarget))]
+    public sealed class OrderBeforeSys : EosSystem
+    {
+        void Execute(OrderBeforeProbe p) => p.Log.Add("before");
+    }
 
     public sealed class OrderA : EosSystem
     {
@@ -73,6 +85,18 @@ namespace EOS.Tests
             world.Update(0f);
 
             Assert.Equal(new[] { "early", "late" }, e.Get<OrderNumProbe>().Log.ToArray());
+        }
+
+        [Fact]
+        public void UpdateBefore_OrdersExecution()
+        {
+            var world = NewWorld();
+            var e = new EosEntity(world, "e", true);
+            e.Add<OrderBeforeProbe>();
+
+            world.Update(0f);
+
+            Assert.Equal(new[] { "before", "target" }, e.Get<OrderBeforeProbe>().Log.ToArray());
         }
     }
 }

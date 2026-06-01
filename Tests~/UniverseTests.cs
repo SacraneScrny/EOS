@@ -1,5 +1,7 @@
 using EOS.Core;
+using EOS.Entities;
 using EOS.Loader;
+using EOS.Serialization;
 using Xunit;
 
 namespace EOS.Tests
@@ -75,6 +77,51 @@ namespace EOS.Tests
 
             world.Update(0f);
             Assert.Equal(before + 1, world.Frame);
+        }
+
+        [Fact]
+        public void FixedAndLateUpdate_RouteToWorlds()
+        {
+            EosDomainReset.Reset();
+            Universe.Boot();
+            var world = Universe.InternalDefaultWorld;
+
+            ulong before = world.Frame;
+            Universe.FixedUpdate(0f);
+            Universe.LateUpdate(0f);
+
+            Assert.Equal(before + 2, world.Frame);
+        }
+
+        [Fact]
+        public void Reset_ClearsWorldEntities()
+        {
+            EosDomainReset.Reset();
+            Universe.Boot();
+            var world = Universe.InternalDefaultWorld;
+            new EosEntity(world, "e", true);
+
+            Universe.Reset();
+
+            Assert.Equal(0, world.Entities.AliveCount);
+        }
+
+        [Fact]
+        public void Boot_RestoresSnapshotFromOnLoad()
+        {
+            EosDomainReset.Reset();
+            Universe.Boot();
+            var seeded = new EosEntity(Universe.InternalDefaultWorld, "seed", true);
+            Universe.InternalDefaultWorld.Entities.SetStableKey(seeded, "seed");
+            var snapshot = WorldSerializer.Capture();
+
+            WorldLoader.OnLoad = () => snapshot;
+            try
+            {
+                Universe.Boot();
+                Assert.True(Universe.InternalDefaultWorld.Entities.TryFind("seed", out _));
+            }
+            finally { WorldLoader.Reset(); }
         }
     }
 }
