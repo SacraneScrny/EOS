@@ -1,6 +1,6 @@
 using System;
 
-namespace EOS.Systems
+namespace EOS.Attributes
 {
     public abstract class TagFilterAttribute : Attribute
     {

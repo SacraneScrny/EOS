@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace EOS.Systems.Groups
+namespace EOS.Attributes
 {
     [AttributeUsage(AttributeTargets.Class)]
     public sealed class GroupAttribute : Attribute

@@ -1,6 +1,6 @@
 using System;
 
-namespace EOS.Systems
+namespace EOS.Attributes
 {
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public class ExcludeAttribute : Attribute

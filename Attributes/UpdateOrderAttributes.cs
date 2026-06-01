@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace EOS.Systems
+namespace EOS.Attributes
 {
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
     public sealed class UpdateAfterAttribute : Attribute

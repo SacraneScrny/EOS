@@ -1,3 +1,4 @@
+using EOS.Attributes;
 using EOS.Core;
 using EOS.Loader;
 using EOS.Systems.Groups;
@@ -7,6 +8,7 @@ using IncarnationObj = EOS.Objects.Incarnation;
 namespace EOS.Systems.Incarnation
 {
     [Group(typeof(IncarnationGroup))]
+    [UpdateOrder(UpdateOrderPhase.AfterAll)]
     public class IncarnationSyncSystem : EosSystem
     {
         public override UpdateType UpdateType => UpdateType.Update;
@@ -14,6 +16,7 @@ namespace EOS.Systems.Incarnation
     }
 
     [Group(typeof(IncarnationGroup))]
+    [UpdateOrder(UpdateOrderPhase.AfterAll)]
     public class IncarnationSyncFixedSystem : EosSystem
     {
         public override UpdateType UpdateType => UpdateType.FixedUpdate;
@@ -21,6 +24,7 @@ namespace EOS.Systems.Incarnation
     }
 
     [Group(typeof(IncarnationGroup))]
+    [UpdateOrder(UpdateOrderPhase.AfterAll)]
     public class IncarnationSyncLateSystem : EosSystem
     {
         public override UpdateType UpdateType => UpdateType.LateUpdate;

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+
+using EOS.Attributes;
 using EOS.Logging;
 using EOS.Systems.Groups;
 
