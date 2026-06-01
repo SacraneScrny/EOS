@@ -9,6 +9,8 @@ namespace EOS.Systems
         protected World World { get; private set; }
         internal void SetWorld(World world) => World = world;
 
+        protected LocalSystemContext Context => new(World.LocalContext, this);
+
         public virtual UpdateType UpdateType => UpdateType.Update;
 
         public bool IsUpdate() => IsEnabled && UpdateWhen();

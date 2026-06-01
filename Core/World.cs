@@ -100,6 +100,10 @@ namespace EOS.Core
         public SystemGroups SystemGroups { get; } = new();
         public InitializeSystemRunner InitializeSystems { get; } = new();
 
+        readonly WorldContext _context = new();
+        public IWorldContext Context => _context;
+        internal WorldContext LocalContext => _context;
+
         #region ECB
         EntityCommandBuffer _beforeAll;
         public IReadOnlyEntityCommandBuffer BeforeAll => _beforeAll;
@@ -144,6 +148,7 @@ namespace EOS.Core
             SystemGroups.Reset();
             Entities.Reset();
             Objects.Reset();
+            _context.Reset();
         }
         public void Init()
         {
@@ -164,6 +169,7 @@ namespace EOS.Core
             Objects.Init(this);
             Entities.Init(this);
             Systems.Init(this);
+            _context.Init(this);
 
             IsEnabled = true;
         }
@@ -226,6 +232,7 @@ namespace EOS.Core
             Entities.Reset();
             Objects.Reset();
             SystemGroups.Reset();
+            _context.Reset();
         }
 
         public bool Equals(World other)
