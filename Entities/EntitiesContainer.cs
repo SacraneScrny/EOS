@@ -130,6 +130,7 @@ namespace EOS.Entities
             _free.Push(id);
 
             World.ObjectsStorages.DestroyEntity(entity);
+            World.Tags.ClearEntity(entity);
         }
 
         void EnsureCapacity(int id)

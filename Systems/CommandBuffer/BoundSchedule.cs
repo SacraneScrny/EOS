@@ -36,6 +36,24 @@ namespace EOS.Systems.CommandBuffer
         public BoundSchedule Destroy()
             => Wrap(_chain.Destroy());
 
+        public BoundSchedule WhenTag(params object[] tags)
+            => Wrap(_chain.WhenTag(tags));
+        public BoundSchedule WhenNoTag(params object[] tags)
+            => Wrap(_chain.WhenNoTag(tags));
+        public BoundSchedule WhenAnyTag(params object[] tags)
+            => Wrap(_chain.WhenAnyTag(tags));
+        public BoundSchedule WhenOneTag(params object[] tags)
+            => Wrap(_chain.WhenOneTag(tags));
+
+        public BoundSchedule AddTag(params object[] tags)
+            => Wrap(_chain.AddTag(tags));
+        public BoundSchedule RemoveTag(params object[] tags)
+            => Wrap(_chain.RemoveTag(tags));
+        public BoundSchedule SetFlag(object tag, bool on)
+            => Wrap(_chain.SetFlag(tag, on));
+        public BoundSchedule ClearTags()
+            => Wrap(_chain.ClearTags());
+
         public BoundSchedule Apply(CommandChain chain)
         {
             _chain.Ops.AddRange(chain.Ops);

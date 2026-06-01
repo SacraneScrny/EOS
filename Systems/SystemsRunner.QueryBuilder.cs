@@ -7,6 +7,7 @@ using EOS.Entities;
 using EOS.Logging;
 using EOS.Objects;
 using EOS.Storage;
+using EOS.Tags;
 
 namespace EOS.Systems
 {
@@ -74,6 +75,8 @@ namespace EOS.Systems
             var concreteIndexed = concreteStorages.Select(s => s as IIndexedStorage).ToArray();
             var concreteOptional = concreteParams.Select(p => p.optional).ToArray();
 
+            var tagFilter = BuildTagFilter(method);
+
             if (isReactive)
                 return (BuildReactiveQuery(instance, method, parameters,
                     concreteParams, concreteStorages, concreteGetMethods, concreteHasMethods,
@@ -81,19 +84,19 @@ namespace EOS.Systems
                     interfaceParams,
                     entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods), true);
+                    excludeStorages, excludeHasMethods, tagFilter), true);
 
             if (concreteParams.Count == 0 && interfaceParams.Count == 0)
                 return (BuildNoComponentQuery(instance, method, parameters,
                     entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods), false);
+                    excludeStorages, excludeHasMethods, tagFilter), false);
 
             if (concreteParams.Count == 0)
                 return (BuildInterfaceOnlyQuery(instance, method, parameters,
                     interfaceParams, entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods), false);
+                    excludeStorages, excludeHasMethods, tagFilter), false);
 
             return (BuildConcreteQuery(instance, method, parameters,
                 concreteParams, concreteStorages, concreteGetMethods, concreteHasMethods,
@@ -101,7 +104,32 @@ namespace EOS.Systems
                 interfaceParams,
                 entityParamIndex, deltaTimeParamIndex,
                 includeStorages, includeHasMethods,
-                excludeStorages, excludeHasMethods), false);
+                excludeStorages, excludeHasMethods, tagFilter), false);
+        }
+
+        TagFilter BuildTagFilter(MethodInfo method)
+        {
+            var require = World.Tags.BuildMask(CollectTags<WithTagAttribute>(method));
+            var exclude = World.Tags.BuildMask(CollectTags<WithoutTagAttribute>(method));
+            var any = World.Tags.BuildMask(CollectTags<WithAnyTagAttribute>(method));
+            var one = World.Tags.BuildMask(CollectTags<WithOneTagAttribute>(method));
+
+            if (require == null && exclude == null && any == null && one == null)
+                return TagFilter.None;
+
+            return new TagFilter(World.Tags, require, exclude, any, one);
+        }
+
+        static IEnumerable<object> CollectTags<TAttr>(MethodInfo method) where TAttr : TagFilterAttribute
+        {
+            List<object> result = null;
+            foreach (var attr in method.GetCustomAttributes<TAttr>(true))
+            {
+                if (attr.Tags == null) continue;
+                result ??= new List<object>();
+                result.AddRange(attr.Tags);
+            }
+            return result;
         }
 
         Action<float, ulong> BuildConcreteQuery(
@@ -113,7 +141,7 @@ namespace EOS.Systems
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
         {
             return (deltaTime, _) =>
             {
@@ -138,6 +166,8 @@ namespace EOS.Systems
                         includeStorages, includeHasMethods,
                         excludeStorages, excludeHasMethods)) continue;
 
+                    if (!tagFilter.Matches(entity)) continue;
+
                     var combos = ResolveInterfaceCombinations(entity, interfaceParams);
                     if (combos == null) continue;
 
@@ -158,7 +188,7 @@ namespace EOS.Systems
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
         {
             int driverConcrete = concreteParams.FindIndex(p => p.channel != Channel.None && !p.optional);
 
@@ -185,6 +215,8 @@ namespace EOS.Systems
                         if (!CheckIncludeExclude(entity,
                             includeStorages, includeHasMethods,
                             excludeStorages, excludeHasMethods)) continue;
+
+                        if (!tagFilter.Matches(entity)) continue;
 
                         var combos = ResolveInterfaceCombinationsReactive(entity, interfaceParams, cursor);
                         if (combos == null) continue;
@@ -237,6 +269,8 @@ namespace EOS.Systems
                                 includeStorages, includeHasMethods,
                                 excludeStorages, excludeHasMethods)) continue;
 
+                            if (!tagFilter.Matches(entity)) continue;
+
                             var combos = ResolveInterfaceCombinationsReactive(entity, interfaceParams, cursor);
                             if (combos == null) continue;
 
@@ -255,7 +289,7 @@ namespace EOS.Systems
             object instance, MethodInfo method, ParameterInfo[] parameters,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
         {
             if (entityParamIndex == -1)
             {
@@ -278,6 +312,8 @@ namespace EOS.Systems
                         includeStorages, includeHasMethods,
                         excludeStorages, excludeHasMethods)) continue;
 
+                    if (!tagFilter.Matches(entity)) continue;
+
                     args[entityParamIndex] = entity;
                     method.Invoke(instance, args);
                 }
@@ -289,7 +325,7 @@ namespace EOS.Systems
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
         {
             var pivotParam = interfaceParams.FirstOrDefault(p => !p.optional);
             if (pivotParam.type == null)
@@ -321,6 +357,8 @@ namespace EOS.Systems
                         if (!CheckIncludeExclude(entity,
                             includeStorages, includeHasMethods,
                             excludeStorages, excludeHasMethods)) continue;
+
+                        if (!tagFilter.Matches(entity)) continue;
 
                         var combos = ResolveInterfaceCombinations(entity, interfaceParams);
                         if (combos == null) continue;

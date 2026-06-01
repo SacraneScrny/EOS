@@ -54,5 +54,47 @@ namespace EOS.Systems.CommandBuffer
             Ops.Add(e => { e.Destroy(); return true; });
             return this;
         }
+
+        public CommandChain WhenTag(params object[] tags)
+        {
+            Ops.Add(e => e.HasAllTags(tags));
+            return this;
+        }
+        public CommandChain WhenNoTag(params object[] tags)
+        {
+            Ops.Add(e => !e.HasAnyTag(tags));
+            return this;
+        }
+        public CommandChain WhenAnyTag(params object[] tags)
+        {
+            Ops.Add(e => e.HasAnyTag(tags));
+            return this;
+        }
+        public CommandChain WhenOneTag(params object[] tags)
+        {
+            Ops.Add(e => e.HasOneTag(tags));
+            return this;
+        }
+
+        public CommandChain AddTag(params object[] tags)
+        {
+            Ops.Add(e => { e.AddTag(tags); return true; });
+            return this;
+        }
+        public CommandChain RemoveTag(params object[] tags)
+        {
+            Ops.Add(e => { e.RemoveTag(tags); return true; });
+            return this;
+        }
+        public CommandChain SetFlag(object tag, bool on)
+        {
+            Ops.Add(e => { e.SetFlag(tag, on); return true; });
+            return this;
+        }
+        public CommandChain ClearTags()
+        {
+            Ops.Add(e => { e.ClearTags(); return true; });
+            return this;
+        }
     }
 }
