@@ -7,6 +7,7 @@ using EOS.Storage;
 using EOS.Systems;
 using EOS.Systems.CommandBuffer;
 using EOS.Systems.Groups;
+using EOS.Tags;
 
 namespace EOS.Core
 {
@@ -22,6 +23,7 @@ namespace EOS.Core
         ObjectsContainer Objects { get; }
         SystemsRunner Systems { get; }
 
+        TagsContainer Tags { get; }
         ObjectsStorageMap ObjectsStorages { get; }
         SystemGroups SystemGroups { get; }
         InitializeSystemRunner InitializeSystems { get; }
@@ -93,6 +95,7 @@ namespace EOS.Core
         public ObjectsContainer Objects { get; } = new();
         public SystemsRunner Systems { get; } = new();
 
+        public TagsContainer Tags { get; } = new();
         public ObjectsStorageMap ObjectsStorages { get; } = new();
         public SystemGroups SystemGroups { get; } = new();
         public InitializeSystemRunner InitializeSystems { get; } = new();
@@ -137,6 +140,7 @@ namespace EOS.Core
             _afterAll.Clear();
 
             ObjectsStorages.Reset();
+            Tags.Reset();
             SystemGroups.Reset();
             Entities.Reset();
             Objects.Reset();
@@ -154,6 +158,7 @@ namespace EOS.Core
             _afterAll = new(this);
 
             ObjectsStorages.Init(this);
+            Tags.Init(this);
             SystemGroups.Init(this);
             InitializeSystems.Init(this);
             Objects.Init(this);
@@ -217,6 +222,7 @@ namespace EOS.Core
             if (IsDisposed) return;
             IsDisposed = true;
             ObjectsStorages.Reset();
+            Tags.Reset();
             Entities.Reset();
             Objects.Reset();
             SystemGroups.Reset();
