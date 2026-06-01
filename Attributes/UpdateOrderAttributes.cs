@@ -15,4 +15,18 @@ namespace EOS.Systems
         public readonly Type Target;
         public UpdateBeforeAttribute(Type target) => Target = target;
     }
+
+    public enum UpdateOrderPhase
+    {
+        BeforeAll = int.MinValue,
+        AfterAll = int.MaxValue
+    }
+
+    [AttributeUsage(AttributeTargets.Class)]
+    public sealed class UpdateOrderAttribute : Attribute
+    {
+        public readonly int Order;
+        public UpdateOrderAttribute(int order) => Order = order;
+        public UpdateOrderAttribute(UpdateOrderPhase phase) => Order = (int)phase;
+    }
 }
