@@ -13,6 +13,7 @@ namespace EOS.Objects
         public bool IsDisposed { get; private set; }
         public bool HasEntity { get; private set; }
         public bool IsEnabled => IsAwaken && IsStarted && _enabled;
+        public bool IsDeserialized { get; internal set; }
 
         protected bool _enabled = true;
         public EosEntity Entity { get; private set; } = EosEntity.Null;

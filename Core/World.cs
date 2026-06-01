@@ -41,6 +41,11 @@ namespace EOS.Core
         public int Id { get; private set; } = -1;
         internal void SetId(int id) => Id = id;
 
+        public string Key { get; private set; }
+        internal void SetKey(string key) => Key = key;
+
+        public bool IsSerializable { get; set; } = true;
+
         public bool IsDisposed { get; private set; }
         public bool IsEnabled { get; private set; }
         public bool IsManualUpdate { get; set; }

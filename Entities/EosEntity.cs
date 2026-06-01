@@ -16,13 +16,13 @@ namespace EOS.Entities
         public bool IsValid => World != null && World.Entities.IsValid(this);
         public bool IsActive => World != null && World.Entities.IsActive(this);
 
-        public EosEntity(World world, string name = "", bool active = false)
+        public EosEntity(World world, string name = "", bool active = false, bool isSerializable = true)
         {
             if (string.IsNullOrWhiteSpace(name))
                 name = "Entity";
             World = world;
 
-            (Id, Version, Name) = world.Entities.Create(name, active);
+            (Id, Version, Name) = world.Entities.Create(name, active, isSerializable);
         }
         internal EosEntity(int id, ushort version, World world, string name = "")
         {

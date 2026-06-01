@@ -1,4 +1,5 @@
 using EOS.Entities;
+using EOS.Objects;
 
 namespace EOS.Storage
 {
@@ -6,5 +7,6 @@ namespace EOS.Storage
     {
         void RemoveEntity(EosEntity entity);
         void Clear();
+        EosObject AddObject(EosEntity entity);
     }
 }
