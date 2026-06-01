@@ -118,7 +118,7 @@ namespace EOS.Serialization
 
             foreach (var bag in ws.Components)
             {
-                var componentType = Type.GetType(bag.TypeName);
+                var componentType = ResolveType(bag.TypeName);
                 if (componentType == null)
                 {
                     EosLog.Warning($"Component type '{bag.TypeName}' not found, skipping", nameof(WorldSerializer));
@@ -162,6 +162,33 @@ namespace EOS.Serialization
                 }
             }
         }
+
+        static Type ResolveType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return null;
+            try
+            {
+                var type = Type.GetType(typeName, ResolveAssembly, ResolveTypeInAssembly);
+                if (type != null) return type;
+            }
+            catch (Exception ex)
+            {
+                EosLog.Warning($"Type resolve failed for '{typeName}': {ex.Message}", nameof(WorldSerializer));
+            }
+            return Type.GetType(typeName);
+        }
+
+        static Assembly ResolveAssembly(AssemblyName name)
+        {
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+                if (assemblies[i].GetName().Name == name.Name)
+                    return assemblies[i];
+            return null;
+        }
+
+        static Type ResolveTypeInAssembly(Assembly assembly, string name, bool ignoreCase)
+            => assembly != null ? assembly.GetType(name, false, ignoreCase) : Type.GetType(name);
 
         sealed class RestoreContext : IDeserializeContext
         {
