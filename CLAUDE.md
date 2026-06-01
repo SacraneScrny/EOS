@@ -68,6 +68,21 @@ Method-level: `[Include(typeof(T))]`, `[Exclude(typeof(T))]` add has/not-has fil
 
 Reactive systems track a `Cursor` (world version watermark). **The cursor advances every frame even when the system's group is disabled**, so events that occur during a disabled period are silently dropped when the group re-enables.
 
+### Generic components
+
+`EosObject` subclasses may be generic. A **closed** generic (`Incarnation<Transform>`) is an ordinary concrete component: `Storage<T>` keys by `typeof(T)`, so each closed type gets its own dense array, and `ObjectsStorageMap` still indexes it under every interface it implements.
+
+Query a generic component one of two ways:
+
+- **By closed type** — `Execute(Incarnation<Transform> inc)` behaves like any concrete parameter.
+- **By a non-generic interface it implements** — declare `interface IFoo` on the generic class, then `Execute([Each] IFoo foo)` fans out across every closed type. `[Each]` is required here: the interface query dedups by entity, so without it an entity carrying two closed variants only fires once.
+
+The idiom: keep the type-dependent work in the component behind a non-generic interface, and keep systems non-generic. `Incarnation<TView>` is the canonical example — the sync systems iterate `[Each] IIncarnation` and call `inc.Sync()`, which dispatches to the typed `IIncarnationBinder<TView>` resolved from the `IncarnationBridge` registry. No casting, no boxing in user code.
+
+**Open-generic systems are not supported.** Discovery does `Activator.CreateInstance` over every non-abstract `EosSystem`, which cannot instantiate an open generic (`FooSystem<T>`). If a system genuinely needs the concrete `T` in its own body, it must be closed and registered explicitly — there is no such hook today. You never create or serialize an *open* generic, only closed ones; `typeof(Incarnation<>)` exists solely as reflection metadata for `MakeGenericType`.
+
+Serialization of closed generics works without per-type registration or attributes: `WorldSerializer` stores `Type.AssemblyQualifiedName` and resolves it version-tolerantly (`ResolveType` matches assemblies by simple name, including each generic argument), so snapshots survive assembly version drift.
+
 ### Deferred structural changes
 
 `World.BeforeAll/BeforeUpdate/AfterUpdate/...` are `EntityCommandBuffer` instances. Use them to defer `Create`, `Add<T>`, `Remove<T>`, `Destroy` when calling from inside a system's `Execute` to avoid mutating storage while iterating it.

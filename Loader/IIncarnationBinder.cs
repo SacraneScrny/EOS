@@ -2,12 +2,12 @@ using EOS.Entities;
 
 namespace EOS.Loader
 {
-    public interface IIncarnationBinder
+    public interface IIncarnationBinder<TView> where TView : class
     {
-        object Instantiate(EosEntity entity, string incarnationId);
-        void Destroy(EosEntity entity, object view);
-        void Sync(EosEntity entity, object view);
-        void SyncFixed(EosEntity entity, object view);
-        void SyncLate(EosEntity entity, object view);
+        TView Instantiate(EosEntity entity, string incarnationId);
+        void Destroy(EosEntity entity, TView view);
+        void Sync(EosEntity entity, TView view);
+        void SyncFixed(EosEntity entity, TView view);
+        void SyncLate(EosEntity entity, TView view);
     }
 }
