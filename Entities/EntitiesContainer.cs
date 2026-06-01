@@ -14,8 +14,11 @@ namespace EOS.Entities
         string[] _names = new string[1024];
         bool[] _actives = new bool[1024];
         bool[] _exists = new bool[1024];
+        bool[] _serializable = new bool[1024];
         readonly List<int> _alive = new();
         int[] _aliveIndex = new int[1024];
+        readonly Dictionary<string, int> _keyToId = new();
+        readonly Dictionary<int, string> _idToKey = new();
 
         internal int AliveCount => _alive.Count;
         internal EosEntity At(int index)
@@ -36,7 +39,7 @@ namespace EOS.Entities
                 action(At(i));
         }
 
-        internal (int Id, ushort Version, string Name) Create(string name, bool active)
+        internal (int Id, ushort Version, string Name) Create(string name, bool active, bool isSerializable = true)
         {
             World.GuardStructuralChange($"Create entity '{name}'");
 
@@ -46,10 +49,44 @@ namespace EOS.Entities
             _names[id] = name;
             _actives[id] = active;
             _exists[id] = true;
+            _serializable[id] = isSerializable;
             _aliveIndex[id] = _alive.Count;
             _alive.Add(id);
 
             return (id, _versions[id], name);
+        }
+
+        public bool IsSerializable(EosEntity entity)
+        {
+            int id = entity.Id;
+            return id >= 0 && id < _serializable.Length && _exists[id] && _serializable[id];
+        }
+
+        public bool TryFind(string key, out EosEntity entity)
+        {
+            if (!string.IsNullOrEmpty(key) && _keyToId.TryGetValue(key, out int id))
+            {
+                entity = new EosEntity(id, _versions[id], World, _names[id] ?? string.Empty);
+                return true;
+            }
+            entity = EosEntity.Null;
+            return false;
+        }
+
+        public void SetStableKey(EosEntity entity, string key)
+        {
+            if (!IsValid(entity)) return;
+            int id = entity.Id;
+            if (_idToKey.TryGetValue(id, out var old)) _keyToId.Remove(old);
+            if (!string.IsNullOrEmpty(key)) { _keyToId[key] = id; _idToKey[id] = key; }
+            else _idToKey.Remove(id);
+        }
+
+        public string GetStableKey(EosEntity entity)
+        {
+            if (!IsValid(entity)) return null;
+            _idToKey.TryGetValue(entity.Id, out var key);
+            return key;
         }
 
         public bool IsValid(EosEntity entity)
@@ -73,6 +110,12 @@ namespace EOS.Entities
             if (!IsValid(entity)) return;
             if (!World.GuardStructuralChange($"Destroy entity '{GetName(entity.Id)}'")) return;
             int id = entity.Id;
+
+            if (_idToKey.TryGetValue(id, out var stableKey))
+            {
+                _keyToId.Remove(stableKey);
+                _idToKey.Remove(id);
+            }
 
             int index = _aliveIndex[id];
             int lastId = _alive[^1];
@@ -98,6 +141,7 @@ namespace EOS.Entities
             Array.Resize(ref _names, n);
             Array.Resize(ref _actives, n);
             Array.Resize(ref _exists, n);
+            Array.Resize(ref _serializable, n);
             Array.Resize(ref _aliveIndex, n);
         }
 
@@ -109,8 +153,11 @@ namespace EOS.Entities
             Array.Clear(_names, 0, _names.Length);
             Array.Clear(_actives, 0, _actives.Length);
             Array.Clear(_exists, 0, _exists.Length);
+            Array.Clear(_serializable, 0, _serializable.Length);
             Array.Clear(_aliveIndex, 0, _aliveIndex.Length);
             _alive.Clear();
+            _keyToId.Clear();
+            _idToKey.Clear();
         }
 
         public readonly struct AliveEntities

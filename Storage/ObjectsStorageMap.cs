@@ -13,6 +13,8 @@ namespace EOS.Storage
         List<IStorage>[] _entityStorages = new List<IStorage>[1024];
         readonly Stack<List<IStorage>> _listPool = new();
 
+        public IReadOnlyDictionary<Type, IStorage> AllStorages => _map;
+
         public Storage<T> Get<T>() where T : EosObject, new()
         {
             if (_map.TryGetValue(typeof(T), out var existing))

@@ -120,6 +120,7 @@ namespace EOS.Storage
         }
 
         public void RemoveEntity(EosEntity entity) => Remove(entity);
+        EosObject IStorage.AddObject(EosEntity entity) => Add(entity);
 
         public void Clear()
         {

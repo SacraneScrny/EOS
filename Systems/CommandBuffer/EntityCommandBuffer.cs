@@ -9,7 +9,7 @@ namespace EOS.Systems.CommandBuffer
 {
     public interface IReadOnlyEntityCommandBuffer
     {
-        public DeferredEntity Create(string name = "");
+        public DeferredEntity Create(string name = "", bool isSerializable = true);
         public BoundSchedule Schedule(EosEntity entity);
         public BoundSchedule Schedule(DeferredEntity deferred);
         public void Schedule(EosEntity entity, CommandChain chain);
@@ -20,14 +20,14 @@ namespace EOS.Systems.CommandBuffer
         readonly World _world;
         public EntityCommandBuffer(World world) => _world = world;
 
-        readonly List<(string name, DeferredEntity deferred)> _creates = new();
+        readonly List<(string name, bool isSerializable, DeferredEntity deferred)> _creates = new();
         readonly List<(EosEntity entity, List<Func<EosEntity, bool>> ops)> _batches = new();
         readonly List<(DeferredEntity deferred, List<Func<EosEntity, bool>> ops)> _deferredBatches = new();
 
-        public DeferredEntity Create(string name = "")
+        public DeferredEntity Create(string name = "", bool isSerializable = true)
         {
             var deferred = new DeferredEntity();
-            _creates.Add((name, deferred));
+            _creates.Add((name, isSerializable, deferred));
             return deferred;
         }
 
@@ -52,10 +52,10 @@ namespace EOS.Systems.CommandBuffer
         {
             for (int i = 0; i < _creates.Count; i++)
             {
-                var (name, deferred) = _creates[i];
+                var (name, isSerializable, deferred) = _creates[i];
                 try
                 {
-                    deferred.Value = new EosEntity(_world, name, true);
+                    deferred.Value = new EosEntity(_world, name, true, isSerializable);
                     deferred.IsResolved = true;
                 }
                 catch (Exception ex)

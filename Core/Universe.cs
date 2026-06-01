@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using EOS.Serialization;
 
 namespace EOS.Core
 {
@@ -9,9 +10,11 @@ namespace EOS.Core
 
         static World _defaultWorld;
         public static IReadOnlyWorld DefaultWorld => _defaultWorld;
+        internal static World InternalDefaultWorld => _defaultWorld;
 
         static readonly List<World> _otherWorlds = new List<World>();
         public static IReadOnlyList<IReadOnlyWorld> OtherWorlds => _otherWorlds;
+        internal static IReadOnlyList<World> InternalOtherWorlds => _otherWorlds;
 
         public static int TotalWorldsCount => 1 + _otherWorlds.Count;
 
@@ -26,6 +29,10 @@ namespace EOS.Core
             _defaultWorld.SetId(_nextId++);
             _defaultWorld.Init();
             IsEnabled = true;
+
+            var snapshot = WorldLoader.OnLoad?.Invoke();
+            if (snapshot != null)
+                WorldSerializer.Restore(snapshot);
         }
         public static void Reset()
         {
@@ -33,14 +40,29 @@ namespace EOS.Core
             foreach (var world in _otherWorlds) world.Reset();
         }
 
-        public static World CreateWorld()
+        public static World CreateWorld(string key = null, bool isSerializable = true)
         {
             var world = new World();
             world.SetId(_nextId++);
+            world.SetKey(key);
+            world.IsSerializable = isSerializable;
             world.Init();
             _otherWorlds.Add(world);
             return world;
         }
+
+        public static bool TryGetWorld(string key, out World world)
+        {
+            if (!string.IsNullOrEmpty(key))
+            {
+                if (_defaultWorld?.Key == key) { world = _defaultWorld; return true; }
+                foreach (var w in _otherWorlds)
+                    if (w.Key == key) { world = w; return true; }
+            }
+            world = null;
+            return false;
+        }
+
         public static bool DestroyWorld(World world)
         {
             if (world == null || world.IsDisposed) return false;
