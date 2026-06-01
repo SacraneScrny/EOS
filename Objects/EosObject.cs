@@ -12,7 +12,7 @@ namespace EOS.Objects
         public bool IsStarted { get; private set; }
         public bool IsDisposed { get; private set; }
         public bool HasEntity { get; private set; }
-        public bool IsEnabled => IsAwaken && IsStarted && _enabled;
+        public bool IsEnabled => IsAwaken && IsStarted && _enabled && Entity.IsActive;
         public bool IsDeserialized { get; internal set; }
 
         protected bool _enabled = true;
