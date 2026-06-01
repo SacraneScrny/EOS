@@ -83,7 +83,17 @@ namespace EOS.Systems
 
                 foreach (var method in methods)
                 {
-                    var (body, reactive) = BuildQuery(instance, method);
+                    Action<float, ulong> body;
+                    bool reactive;
+                    try
+                    {
+                        (body, reactive) = BuildQuery(instance, method);
+                    }
+                    catch (Exception ex)
+                    {
+                        EosLog.Error($"{type.Name}.{method.Name}: {ex.Message}", nameof(SystemsRunner));
+                        continue;
+                    }
                     var entry = new SystemEntry(body, isUpdate, type, reactive, reactive ? World.Version : 0UL);
 
                     switch (instance.UpdateType)

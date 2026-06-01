@@ -1,6 +1,7 @@
 using System;
 using EOS.Core;
 using EOS.Entities;
+using EOS.Logging;
 using EOS.Objects;
 
 namespace EOS.Storage
@@ -58,7 +59,20 @@ namespace EOS.Storage
             return _data[i];
         }
 
-        public T Get(EosEntity entity) => _data[IndexOf(entity)];
+        public T Get(EosEntity entity)
+        {
+            try
+            {
+                int i = IndexOf(entity);
+                if (i < 0) throw new InvalidOperationException($"Entity {entity.Id} not found in Storage<{typeof(T).Name}>");
+                return _data[i];
+            }
+            catch (Exception ex)
+            {
+                EosLog.Error(ex.Message, nameof(Storage<T>));
+                return null;
+            }
+        }
         public bool TryGet(EosEntity entity, out T result)
         {
             int i = IndexOf(entity);

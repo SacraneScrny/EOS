@@ -199,7 +199,12 @@ namespace EOS.Systems
             }
             else
             {
-                var driverIface = interfaceParams.First(p => p.channel != Channel.None && !p.optional);
+                var driverIface = interfaceParams.FirstOrDefault(p => p.channel != Channel.None && !p.optional);
+                if (driverIface.type == null)
+                {
+                    EosLog.Error($"{instance.GetType().Name}.Execute: reactive interface query requires at least one non-optional reactive interface parameter", nameof(SystemsRunner));
+                    return (_, __) => { };
+                }
                 Channel driverChannel = driverIface.channel;
                 Type driverType = driverIface.type;
 
@@ -286,7 +291,13 @@ namespace EOS.Systems
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods)
         {
-            var pivotIfaceType = interfaceParams.First(p => !p.optional).type;
+            var pivotParam = interfaceParams.FirstOrDefault(p => !p.optional);
+            if (pivotParam.type == null)
+            {
+                EosLog.Error($"{instance.GetType().Name}.Execute: at least one interface parameter must be non-optional", nameof(SystemsRunner));
+                return (_, __) => { };
+            }
+            var pivotIfaceType = pivotParam.type;
 
             return (deltaTime, _) =>
             {
