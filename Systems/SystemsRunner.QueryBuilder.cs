@@ -20,7 +20,7 @@ namespace EOS.Systems
         const string EXECUTE_METHOD = "Execute";
         const string EVENT_EXECUTE_METHOD = "EventExecute";
         const string GET = "Get";
-        const string HAS = "Has";
+        const string HAS = "HasReady";
         const string GET_OWNER = "GetOwner";
         const string COUNT = "Count";
 
@@ -502,7 +502,7 @@ namespace EOS.Systems
                 if (channel != Channel.None)
                 {
                     int idx = concreteIndexed[j].IndexOf(entity);
-                    if (idx < 0)
+                    if (idx < 0 || !concreteIndexed[j].IsReady(idx))
                     {
                         if (optional) continue;
                         return false;
@@ -619,7 +619,7 @@ namespace EOS.Systems
             {
                 var indexed = storages[s] as IIndexedStorage;
                 if (indexed == null) continue;
-                var component = indexed.TryGetObject(entity);
+                var component = indexed.TryGetReadyObject(entity);
                 if (component != null) into.Add(component);
             }
         }
@@ -636,6 +636,7 @@ namespace EOS.Systems
                 if (indexed == null) continue;
                 int idx = indexed.IndexOf(entity);
                 if (idx < 0) continue;
+                if (!indexed.IsReady(idx)) continue;
                 var component = indexed.GetAt(idx);
                 if (component == null) continue;
                 if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor) continue;
@@ -652,7 +653,7 @@ namespace EOS.Systems
             {
                 var indexed = storage as IIndexedStorage;
                 if (indexed == null) continue;
-                var component = indexed.TryGetObject(entity);
+                var component = indexed.TryGetReadyObject(entity);
                 if (component != null) return component;
             }
             return null;
@@ -669,6 +670,7 @@ namespace EOS.Systems
                 if (indexed == null) continue;
                 int idx = indexed.IndexOf(entity);
                 if (idx < 0) continue;
+                if (!indexed.IsReady(idx)) continue;
                 var component = indexed.GetAt(idx);
                 if (component == null) continue;
                 if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor) continue;
@@ -695,7 +697,7 @@ namespace EOS.Systems
                 if (j == pivot && pivotIndex >= 0)
                     args[concreteParams[j].position] = concreteIndexed[pivot].GetAt(pivotIndex);
                 else if (concreteParams[j].optional)
-                    args[concreteParams[j].position] = concreteIndexed[j].TryGetObject(entity);
+                    args[concreteParams[j].position] = concreteIndexed[j].TryGetReadyObject(entity);
                 else
                     args[concreteParams[j].position] = concreteGetMethods[j].Invoke(concreteStorages[j], new object[] { entity });
             }

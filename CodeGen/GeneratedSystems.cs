@@ -54,14 +54,14 @@ namespace EOS.CodeGen
         public static bool IncludeMatch(IIndexedStorage[] include, EosEntity entity)
         {
             for (int i = 0; i < include.Length; i++)
-                if (include[i].IndexOf(entity) < 0) return false;
+                if (!include[i].HasReady(entity)) return false;
             return true;
         }
 
         public static bool ExcludeMatch(IIndexedStorage[] exclude, EosEntity entity)
         {
             for (int i = 0; i < exclude.Length; i++)
-                if (exclude[i].IndexOf(entity) >= 0) return false;
+                if (exclude[i].HasReady(entity)) return false;
             return true;
         }
     }

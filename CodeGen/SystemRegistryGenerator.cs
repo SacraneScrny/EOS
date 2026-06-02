@@ -186,9 +186,9 @@ namespace EOS.CodeGen
             foreach (var (param, index) in concrete)
             {
                 if (param.Optional)
-                    sb.Append("                    s").Append(index).Append(".TryGet(e, out var c").Append(index).Append(");\n");
+                    sb.Append("                    s").Append(index).Append(".TryGetReady(e, out var c").Append(index).Append(");\n");
                 else
-                    sb.Append("                    if (!s").Append(index).Append(".TryGet(e, out var c").Append(index).Append(")) continue;\n");
+                    sb.Append("                    if (!s").Append(index).Append(".TryGetReady(e, out var c").Append(index).Append(")) continue;\n");
             }
             sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.IncludeMatch(include, e)) continue;\n");
             sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.ExcludeMatch(exclude, e)) continue;\n");
