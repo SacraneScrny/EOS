@@ -57,7 +57,8 @@ namespace EOS.CodeGen
                     if (!CanInvoke(method)) continue;
 
                     var key = SystemSignature.Of(method);
-                    if (method.Name == "Execute" && SystemShape.IsTypedEligible(method))
+                    if (method.Name == "Execute" && SystemShape.CanTypeBody(method)
+                        && AllTypesAccessible(type, method) && InterfacesEnumerable(method))
                     {
                         var bindName = "Bind_" + bindId++;
                         EmitBind(binds, bindName, name, method);
@@ -134,21 +135,45 @@ namespace EOS.CodeGen
             sb.Append("                }").Append(tail);
         }
 
+        sealed class Iface
+        {
+            public QueryParam Param;
+            public int Index;
+            public List<Type> Impls;
+        }
+
         static void EmitBind(StringBuilder sb, string bindName, string systemName, MethodInfo method)
         {
             var parameters = SystemShape.Parameters(method);
 
-            var concrete = new List<(QueryParam param, int index)>();
+            var concrete = new List<(QueryParam p, int index)>();
             var concreteByPosition = new Dictionary<int, int>();
+            var ifaces = new List<Iface>();
+            var ifaceByPosition = new Dictionary<int, int>();
+
             foreach (var p in parameters)
             {
-                if (!p.IsConcrete) continue;
-                int index = concrete.Count;
-                concrete.Add((p, index));
-                concreteByPosition[p.Position] = index;
+                if (p.IsConcrete)
+                {
+                    int index = concrete.Count;
+                    concrete.Add((p, index));
+                    concreteByPosition[p.Position] = index;
+                }
+                else if (p.IsInterface)
+                {
+                    int index = ifaces.Count;
+                    ifaces.Add(new Iface { Param = p, Index = index, Impls = InterfaceImpls(p.Type) });
+                    ifaceByPosition[p.Position] = index;
+                }
             }
 
-            var mandatory = concrete.Where(c => !c.param.Optional).ToList();
+            var mandatoryConcrete = concrete.Where(c => !c.p.Optional).ToList();
+            var mandatoryInterface = ifaces.Where(f => !f.Param.Optional).ToList();
+            bool hasEntity = parameters.Any(p => p.IsEntity);
+
+            bool concreteDriver = mandatoryConcrete.Count > 0;
+            bool interfaceDriver = !concreteDriver && mandatoryInterface.Count > 0;
+            bool entityScan = !concreteDriver && !interfaceDriver && hasEntity;
 
             sb.Append("        static global::System.Action<float, ulong> ").Append(bindName).Append("(\n");
             sb.Append("            global::EOS.Systems.EosSystem system,\n");
@@ -158,48 +183,163 @@ namespace EOS.CodeGen
             sb.Append("            global::System.Func<global::EOS.Entities.EosEntity, bool> tagMatch)\n");
             sb.Append("        {\n");
             sb.Append("            var self = (").Append(systemName).Append(")system;\n");
-            foreach (var (param, index) in concrete)
-                sb.Append("            var s").Append(index).Append(" = world.ObjectsStorages.Get<").Append(CSharpName(param.Type)).Append(">();\n");
+            foreach (var (p, index) in concrete)
+                sb.Append("            var s").Append(index).Append(" = world.ObjectsStorages.Get<").Append(CSharpName(p.Type)).Append(">();\n");
+            foreach (var f in ifaces)
+            {
+                sb.Append("            var impl").Append(f.Index).Append(" = new global::EOS.Storage.IIndexedStorage[] {");
+                for (int k = 0; k < f.Impls.Count; k++)
+                {
+                    if (k > 0) sb.Append(',');
+                    sb.Append(" world.ObjectsStorages.Get<").Append(CSharpName(f.Impls[k])).Append(">()");
+                }
+                if (f.Impls.Count > 0) sb.Append(' ');
+                sb.Append("};\n");
+            }
+            if (interfaceDriver)
+                sb.Append("            var seen = new global::System.Collections.Generic.HashSet<int>();\n");
+
             sb.Append("            return (dt, _) =>\n");
             sb.Append("            {\n");
 
-            if (mandatory.Count == 1)
+            if (concreteDriver)
             {
-                sb.Append("                global::EOS.Storage.IIndexedStorage pivot = s").Append(mandatory[0].index).Append(";\n");
+                if (mandatoryConcrete.Count == 1)
+                {
+                    sb.Append("                global::EOS.Storage.IIndexedStorage pivot = s").Append(mandatoryConcrete[0].index).Append(";\n");
+                }
+                else
+                {
+                    sb.Append("                global::EOS.Storage.IIndexedStorage pivot = s").Append(mandatoryConcrete[0].index).Append(";\n");
+                    sb.Append("                int min = s").Append(mandatoryConcrete[0].index).Append(".Count;\n");
+                    for (int k = 1; k < mandatoryConcrete.Count; k++)
+                    {
+                        int mi = mandatoryConcrete[k].index;
+                        sb.Append("                if (s").Append(mi).Append(".Count < min) { min = s").Append(mi).Append(".Count; pivot = s").Append(mi).Append("; }\n");
+                    }
+                }
+                sb.Append("                int count = pivot.Count;\n");
+                sb.Append("                for (int i = 0; i < count; i++)\n");
+                sb.Append("                {\n");
+                sb.Append("                    if (!pivot.IsReady(i)) continue;\n");
+                sb.Append("                    var e = pivot.GetOwner(i);\n");
+                EmitPerEntity(sb, "                    ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition);
+                sb.Append("                }\n");
+            }
+            else if (interfaceDriver)
+            {
+                sb.Append("                seen.Clear();\n");
+                sb.Append("                var driver = impl").Append(mandatoryInterface[0].Index).Append(";\n");
+                sb.Append("                for (int di = 0; di < driver.Length; di++)\n");
+                sb.Append("                {\n");
+                sb.Append("                    var drv = driver[di];\n");
+                sb.Append("                    int dcount = drv.Count;\n");
+                sb.Append("                    for (int i = 0; i < dcount; i++)\n");
+                sb.Append("                    {\n");
+                sb.Append("                        if (!drv.IsReady(i)) continue;\n");
+                sb.Append("                        var e = drv.GetOwner(i);\n");
+                sb.Append("                        if (!seen.Add(e.Id)) continue;\n");
+                EmitPerEntity(sb, "                        ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition);
+                sb.Append("                    }\n");
+                sb.Append("                }\n");
+            }
+            else if (entityScan)
+            {
+                sb.Append("                foreach (var e in world.Entities.All())\n");
+                sb.Append("                {\n");
+                EmitPerEntity(sb, "                    ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition);
+                sb.Append("                }\n");
             }
             else
             {
-                sb.Append("                global::EOS.Storage.IIndexedStorage pivot = s").Append(mandatory[0].index).Append(";\n");
-                sb.Append("                int min = s").Append(mandatory[0].index).Append(".Count;\n");
-                for (int k = 1; k < mandatory.Count; k++)
-                {
-                    int mi = mandatory[k].index;
-                    sb.Append("                if (s").Append(mi).Append(".Count < min) { min = s").Append(mi).Append(".Count; pivot = s").Append(mi).Append("; }\n");
-                }
+                sb.Append("                self.").Append(method.Name).Append('(').Append(CallArguments(parameters, concreteByPosition, ifaceByPosition)).Append(");\n");
             }
 
-            sb.Append("                int count = pivot.Count;\n");
-            sb.Append("                for (int i = 0; i < count; i++)\n");
-            sb.Append("                {\n");
-            sb.Append("                    if (!pivot.IsReady(i)) continue;\n");
-            sb.Append("                    var e = pivot.GetOwner(i);\n");
-            foreach (var (param, index) in concrete)
-            {
-                if (param.Optional)
-                    sb.Append("                    s").Append(index).Append(".TryGetReady(e, out var c").Append(index).Append(");\n");
-                else
-                    sb.Append("                    if (!s").Append(index).Append(".TryGetReady(e, out var c").Append(index).Append(")) continue;\n");
-            }
-            sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.IncludeMatch(include, e)) continue;\n");
-            sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.ExcludeMatch(exclude, e)) continue;\n");
-            sb.Append("                    if (tagMatch != null && !tagMatch(e)) continue;\n");
-            sb.Append("                    self.").Append(method.Name).Append('(').Append(CallArguments(parameters, concreteByPosition)).Append(");\n");
-            sb.Append("                }\n");
             sb.Append("            };\n");
             sb.Append("        }\n");
         }
 
-        static string CallArguments(List<QueryParam> parameters, Dictionary<int, int> concreteByPosition)
+        static void EmitPerEntity(
+            StringBuilder sb, string indent, MethodInfo method, List<QueryParam> parameters,
+            List<(QueryParam p, int index)> concrete, Dictionary<int, int> concreteByPosition,
+            List<Iface> ifaces, Dictionary<int, int> ifaceByPosition)
+        {
+            foreach (var (p, index) in concrete)
+            {
+                if (p.Optional)
+                    sb.Append(indent).Append("s").Append(index).Append(".TryGetReady(e, out var c").Append(index).Append(");\n");
+                else
+                    sb.Append(indent).Append("if (!s").Append(index).Append(".TryGetReady(e, out var c").Append(index).Append(")) continue;\n");
+            }
+            sb.Append(indent).Append("if (!global::EOS.CodeGen.GeneratedQuery.IncludeMatch(include, e)) continue;\n");
+            sb.Append(indent).Append("if (!global::EOS.CodeGen.GeneratedQuery.ExcludeMatch(exclude, e)) continue;\n");
+            sb.Append(indent).Append("if (tagMatch != null && !tagMatch(e)) continue;\n");
+            EmitFanout(sb, indent, 0, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+        }
+
+        static void EmitFanout(
+            StringBuilder sb, string indent, int fanoutIndex, MethodInfo method, List<QueryParam> parameters,
+            Dictionary<int, int> concreteByPosition, List<Iface> ifaces, Dictionary<int, int> ifaceByPosition)
+        {
+            if (fanoutIndex == ifaces.Count)
+            {
+                sb.Append(indent).Append("self.").Append(method.Name).Append('(').Append(CallArguments(parameters, concreteByPosition, ifaceByPosition)).Append(");\n");
+                return;
+            }
+
+            var f = ifaces[fanoutIndex];
+            int idx = f.Index;
+            string type = CSharpName(f.Param.Type);
+            string inner = indent + "    ";
+
+            if (f.Param.Each)
+            {
+                if (f.Param.Optional)
+                    sb.Append(indent).Append("bool any").Append(idx).Append(" = false;\n");
+
+                sb.Append(indent).Append("for (int j").Append(idx).Append(" = 0; j").Append(idx).Append(" < impl").Append(idx).Append(".Length; j").Append(idx).Append("++)\n");
+                sb.Append(indent).Append("{\n");
+                sb.Append(inner).Append("var o").Append(idx).Append(" = impl").Append(idx).Append("[j").Append(idx).Append("].TryGetReadyObject(e);\n");
+                sb.Append(inner).Append("if (o").Append(idx).Append(" == null) continue;\n");
+                if (f.Param.Optional)
+                    sb.Append(inner).Append("any").Append(idx).Append(" = true;\n");
+                sb.Append(inner).Append("var v").Append(idx).Append(" = (").Append(type).Append(")o").Append(idx).Append(";\n");
+                EmitFanout(sb, inner, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                sb.Append(indent).Append("}\n");
+
+                if (f.Param.Optional)
+                {
+                    sb.Append(indent).Append("if (!any").Append(idx).Append(")\n");
+                    sb.Append(indent).Append("{\n");
+                    sb.Append(inner).Append(type).Append(" v").Append(idx).Append(" = null;\n");
+                    EmitFanout(sb, inner, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                    sb.Append(indent).Append("}\n");
+                }
+            }
+            else
+            {
+                sb.Append(indent).Append(type).Append(" v").Append(idx).Append(" = null;\n");
+                sb.Append(indent).Append("for (int j").Append(idx).Append(" = 0; j").Append(idx).Append(" < impl").Append(idx).Append(".Length; j").Append(idx).Append("++)\n");
+                sb.Append(indent).Append("{\n");
+                sb.Append(inner).Append("var o").Append(idx).Append(" = impl").Append(idx).Append("[j").Append(idx).Append("].TryGetReadyObject(e);\n");
+                sb.Append(inner).Append("if (o").Append(idx).Append(" != null) { v").Append(idx).Append(" = (").Append(type).Append(")o").Append(idx).Append("; break; }\n");
+                sb.Append(indent).Append("}\n");
+
+                if (f.Param.Optional)
+                {
+                    EmitFanout(sb, indent, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                }
+                else
+                {
+                    sb.Append(indent).Append("if (v").Append(idx).Append(" != null)\n");
+                    sb.Append(indent).Append("{\n");
+                    EmitFanout(sb, inner, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                    sb.Append(indent).Append("}\n");
+                }
+            }
+        }
+
+        static string CallArguments(List<QueryParam> parameters, Dictionary<int, int> concreteByPosition, Dictionary<int, int> ifaceByPosition)
         {
             var sb = new StringBuilder();
             for (int i = 0; i < parameters.Count; i++)
@@ -208,9 +348,111 @@ namespace EOS.CodeGen
                 var p = parameters[i];
                 if (p.IsEntity) sb.Append('e');
                 else if (p.IsDelta) sb.Append("dt");
-                else sb.Append('c').Append(concreteByPosition[p.Position]);
+                else if (p.IsConcrete) sb.Append('c').Append(concreteByPosition[p.Position]);
+                else sb.Append('v').Append(ifaceByPosition[p.Position]);
             }
             return sb.ToString();
+        }
+
+        static readonly Dictionary<Type, List<Type>> _implCache = new();
+
+        static List<Type> InterfaceImpls(Type iface)
+        {
+            if (_implCache.TryGetValue(iface, out var cached)) return cached;
+
+            var result = new List<Type>();
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try { types = assembly.GetTypes(); }
+                catch (ReflectionTypeLoadException ex) { types = ex.Types; }
+                catch (Exception) { continue; }
+
+                foreach (var type in types)
+                {
+                    if (type == null) continue;
+                    if (!type.IsClass || type.IsAbstract) continue;
+                    if (type.IsGenericTypeDefinition) continue;
+                    if (!typeof(EosObject).IsAssignableFrom(type)) continue;
+                    if (!iface.IsAssignableFrom(type)) continue;
+                    if (type.GetConstructor(Type.EmptyTypes) == null) continue;
+                    result.Add(type);
+                }
+            }
+            result.Sort((a, b) => string.CompareOrdinal(a.FullName, b.FullName));
+            _implCache[iface] = result;
+            return result;
+        }
+
+        static bool InterfacesEnumerable(MethodInfo method)
+        {
+            foreach (var p in SystemShape.Parameters(method))
+                if (p.IsInterface && !InterfaceFullyEnumerable(p.Type))
+                    return false;
+            return true;
+        }
+
+        static bool InterfaceFullyEnumerable(Type iface)
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try { types = assembly.GetTypes(); }
+                catch (ReflectionTypeLoadException ex) { types = ex.Types; }
+                catch (Exception) { continue; }
+
+                foreach (var type in types)
+                {
+                    if (type == null) continue;
+                    if (!type.IsGenericTypeDefinition) continue;
+                    if (!DerivesFromEosObject(type)) continue;
+                    foreach (var implemented in type.GetInterfaces())
+                        if (implemented == iface) return false;
+                }
+            }
+            return true;
+        }
+
+        static bool DerivesFromEosObject(Type type)
+        {
+            for (var b = type; b != null && b != typeof(object); b = b.BaseType)
+            {
+                var normalized = b.IsGenericType ? b.GetGenericTypeDefinition() : b;
+                if (normalized == typeof(EosObject)) return true;
+            }
+            return false;
+        }
+
+        static bool AllTypesAccessible(Type systemType, MethodInfo method)
+        {
+            if (!IsAccessible(systemType)) return false;
+            foreach (var p in SystemShape.Parameters(method))
+            {
+                if (p.IsConcrete && !IsAccessible(p.Type)) return false;
+                if (p.IsInterface)
+                {
+                    if (!IsAccessible(p.Type)) return false;
+                    foreach (var impl in InterfaceImpls(p.Type))
+                        if (!IsAccessible(impl)) return false;
+                }
+            }
+            return true;
+        }
+
+        static bool IsAccessible(Type type)
+        {
+            if (type.IsByRef || type.IsArray) return IsAccessible(type.GetElementType());
+            if (type.IsGenericType)
+                foreach (var arg in type.GetGenericArguments())
+                    if (!IsAccessible(arg)) return false;
+
+            var cursor = type.IsGenericType ? type.GetGenericTypeDefinition() : type;
+            while (cursor.IsNested)
+            {
+                if (cursor.IsNestedPrivate || cursor.IsNestedFamily) return false;
+                cursor = cursor.DeclaringType;
+            }
+            return true;
         }
 
         static List<Type> DiscoverSystems()

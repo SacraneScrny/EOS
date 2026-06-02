@@ -171,7 +171,7 @@ namespace EOS.Systems
                     try
                     {
                         var binder = generated?.GetBody(sig);
-                        if (binder != null && SystemShape.IsTypedEligible(method))
+                        if (binder != null && SystemShape.CanTypeBody(method))
                         {
                             var include = ResolveIndexedStorages(CollectIncludeTypes(method));
                             var exclude = ResolveIndexedStorages(CollectExcludeTypes(method));
@@ -181,6 +181,8 @@ namespace EOS.Systems
                         }
                         else
                         {
+                            if (generated != null)
+                                EosLog.Warning($"{type.Name}.{method.Name}: no generated typed body, falling back to reflection (unsupported shape or stale registry — regenerate)", nameof(SystemsRunner));
                             (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(sig));
                         }
                     }

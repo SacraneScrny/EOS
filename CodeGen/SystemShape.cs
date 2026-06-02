@@ -56,19 +56,38 @@ namespace EOS.CodeGen
             return result;
         }
 
-        public static bool IsTypedEligible(MethodInfo method)
+        public static bool IsReactive(MethodInfo method)
+        {
+            foreach (var p in Parameters(method))
+                if (p.Reactive) return true;
+            return false;
+        }
+
+        public static bool CanTypeBody(MethodInfo method)
         {
             if (method.Name != "Execute") return false;
 
             bool anyMandatoryConcrete = false;
+            bool anyMandatoryInterface = false;
+            bool anyComponentOrInterface = false;
+
             foreach (var p in Parameters(method))
             {
                 if (p.Unsupported) return false;
                 if (p.Reactive) return false;
-                if (p.IsInterface) return false;
-                if (p.IsConcrete && !p.Optional) anyMandatoryConcrete = true;
+                if (p.IsConcrete)
+                {
+                    anyComponentOrInterface = true;
+                    if (!p.Optional) anyMandatoryConcrete = true;
+                }
+                else if (p.IsInterface)
+                {
+                    anyComponentOrInterface = true;
+                    if (!p.Optional) anyMandatoryInterface = true;
+                }
             }
-            return anyMandatoryConcrete;
+
+            return anyMandatoryConcrete || anyMandatoryInterface || !anyComponentOrInterface;
         }
     }
 }
