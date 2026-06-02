@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 
 using EOS.Attributes;
+using EOS.CodeGen;
 using EOS.Core;
 using EOS.Entities;
 using EOS.Events;
@@ -23,7 +24,13 @@ namespace EOS.Systems
         const string GET_OWNER = "GetOwner";
         const string COUNT = "Count";
 
-        (Action<float, ulong> body, bool reactive) BuildQuery(object instance, MethodInfo method)
+        static void Invoke(SystemInvoker invoker, object instance, MethodInfo method, object[] args)
+        {
+            if (invoker != null) invoker((EosSystem)instance, args);
+            else method.Invoke(instance, args);
+        }
+
+        (Action<float, ulong> body, bool reactive) BuildQuery(object instance, MethodInfo method, SystemInvoker invoker)
         {
             var parameters = method.GetParameters();
             int entityParamIndex = -1;
@@ -88,19 +95,19 @@ namespace EOS.Systems
                     interfaceParams,
                     entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods, tagFilter), true);
+                    excludeStorages, excludeHasMethods, tagFilter, invoker), true);
 
             if (concreteParams.Count == 0 && interfaceParams.Count == 0)
                 return (BuildNoComponentQuery(instance, method, parameters,
                     entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods, tagFilter), false);
+                    excludeStorages, excludeHasMethods, tagFilter, invoker), false);
 
             if (concreteParams.Count == 0)
                 return (BuildInterfaceOnlyQuery(instance, method, parameters,
                     interfaceParams, entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods, tagFilter), false);
+                    excludeStorages, excludeHasMethods, tagFilter, invoker), false);
 
             return (BuildConcreteQuery(instance, method, parameters,
                 concreteParams, concreteStorages, concreteGetMethods, concreteHasMethods,
@@ -108,10 +115,10 @@ namespace EOS.Systems
                 interfaceParams,
                 entityParamIndex, deltaTimeParamIndex,
                 includeStorages, includeHasMethods,
-                excludeStorages, excludeHasMethods, tagFilter), false);
+                excludeStorages, excludeHasMethods, tagFilter, invoker), false);
         }
 
-        (Action<float> body, IEventChannel channel, int slot) BuildEventQuery(object instance, MethodInfo method)
+        (Action<float> body, IEventChannel channel, int slot) BuildEventQuery(object instance, MethodInfo method, SystemInvoker invoker)
         {
             var parameters = method.GetParameters();
             int eventParamIndex = -1;
@@ -157,7 +164,7 @@ namespace EOS.Systems
                 {
                     if (channel.SeqAt(i) <= cursor) continue;
                     args[evPos] = channel.BoxedAt(i);
-                    method.Invoke(instance, args);
+                    Invoke(invoker, instance, method, args);
                 }
             };
 
@@ -198,7 +205,8 @@ namespace EOS.Systems
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
+            SystemInvoker invoker)
         {
             return (deltaTime, _) =>
             {
@@ -229,7 +237,7 @@ namespace EOS.Systems
                     if (combos == null) continue;
 
                     for (int c = 0; c < combos.Count; c++)
-                        method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
+                        Invoke(invoker, instance, method, BuildArgs(parameters, entity, deltaTime,
                             deltaTimeParamIndex, entityParamIndex,
                             concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, pivot, i,
                             interfaceParams, combos[c]));
@@ -245,7 +253,8 @@ namespace EOS.Systems
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
+            SystemInvoker invoker)
         {
             int driverConcrete = concreteParams.FindIndex(p => p.channel != Channel.None && !p.optional);
 
@@ -279,7 +288,7 @@ namespace EOS.Systems
                         if (combos == null) continue;
 
                         for (int c = 0; c < combos.Count; c++)
-                            method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
+                            Invoke(invoker, instance, method, BuildArgs(parameters, entity, deltaTime,
                                 deltaTimeParamIndex, entityParamIndex,
                                 concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, driverConcrete, i,
                                 interfaceParams, combos[c]));
@@ -332,7 +341,7 @@ namespace EOS.Systems
                             if (combos == null) continue;
 
                             for (int c = 0; c < combos.Count; c++)
-                                method.Invoke(instance, BuildArgs(parameters, entity, deltaTime,
+                                Invoke(invoker, instance, method, BuildArgs(parameters, entity, deltaTime,
                                     deltaTimeParamIndex, entityParamIndex,
                                     concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, -1, -1,
                                     interfaceParams, combos[c]));
@@ -346,7 +355,8 @@ namespace EOS.Systems
             object instance, MethodInfo method, ParameterInfo[] parameters,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
+            SystemInvoker invoker)
         {
             if (entityParamIndex == -1)
             {
@@ -354,7 +364,7 @@ namespace EOS.Systems
                 {
                     var args = new object[parameters.Length];
                     if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
-                    method.Invoke(instance, args);
+                    Invoke(invoker, instance, method, args);
                 };
             }
 
@@ -372,7 +382,7 @@ namespace EOS.Systems
                     if (!tagFilter.Matches(entity)) continue;
 
                     args[entityParamIndex] = entity;
-                    method.Invoke(instance, args);
+                    Invoke(invoker, instance, method, args);
                 }
             };
         }
@@ -382,7 +392,8 @@ namespace EOS.Systems
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
-            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter)
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
+            SystemInvoker invoker)
         {
             var pivotParam = interfaceParams.FirstOrDefault(p => !p.optional);
             if (pivotParam.type == null)
@@ -430,7 +441,7 @@ namespace EOS.Systems
                             for (int j = 0; j < interfaceParams.Count; j++)
                                 args[interfaceParams[j].position] = combo[j];
 
-                            method.Invoke(instance, args);
+                            Invoke(invoker, instance, method, args);
                         }
                     }
                 }
