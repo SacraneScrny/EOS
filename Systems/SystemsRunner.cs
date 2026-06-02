@@ -5,6 +5,7 @@ using System.Reflection;
 
 using EOS.Attributes;
 using EOS.Core;
+using EOS.Events;
 using EOS.Logging;
 using EOS.Profiling;
 using EOS.Systems.Groups;
@@ -33,9 +34,31 @@ namespace EOS.Systems
             }
         }
 
+        sealed class EventEntry
+        {
+            public readonly Action<float> Body;
+            public readonly Func<bool> IsUpdate;
+            public readonly IEventChannel Channel;
+            public readonly int Slot;
+            public readonly string Label;
+
+            public EventEntry(Action<float> body, Func<bool> isUpdate, IEventChannel channel, int slot, string label)
+            {
+                Body = body;
+                IsUpdate = isUpdate;
+                Channel = channel;
+                Slot = slot;
+                Label = label;
+            }
+        }
+
         readonly List<SystemEntry> _update = new();
         readonly List<SystemEntry> _fixedUpdate = new();
         readonly List<SystemEntry> _lateUpdate = new();
+
+        readonly List<EventEntry> _eventUpdate = new();
+        readonly List<EventEntry> _eventFixedUpdate = new();
+        readonly List<EventEntry> _eventLateUpdate = new();
 
         readonly List<EosSystem> _all = new();
         readonly Dictionary<Type, EosSystem> _typeToSystem = new();
@@ -47,6 +70,9 @@ namespace EOS.Systems
             _update.Clear();
             _fixedUpdate.Clear();
             _lateUpdate.Clear();
+            _eventUpdate.Clear();
+            _eventFixedUpdate.Clear();
+            _eventLateUpdate.Clear();
 
             var types = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
@@ -72,10 +98,11 @@ namespace EOS.Systems
                 try { instance.Awake(); }
                 catch (Exception ex) { EosLog.Error($"{type.Name}.Awake threw: {ex.Message}", nameof(SystemsRunner)); }
 
-                var methods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    .Where(m => m.Name == EXECUTE_METHOD);
+                var allMethods = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var methods = allMethods.Where(m => m.Name == EXECUTE_METHOD).ToArray();
+                var eventMethods = allMethods.Where(m => m.Name == EVENT_EXECUTE_METHOD).ToArray();
 
-                if (!methods.Any())
+                if (methods.Length == 0 && eventMethods.Length == 0)
                     continue;
 
                 var groupAttr = type.GetCustomAttribute<GroupAttribute>();
@@ -85,6 +112,30 @@ namespace EOS.Systems
 
                 if (groupAttr != null)
                     World.SystemGroups.Register(groupAttr.Group);
+
+                foreach (var method in eventMethods)
+                {
+                    Action<float> body;
+                    IEventChannel channel;
+                    int slot;
+                    try
+                    {
+                        (body, channel, slot) = BuildEventQuery(instance, method);
+                    }
+                    catch (Exception ex)
+                    {
+                        EosLog.Error($"{type.Name}.{method.Name}: {ex.Message}", nameof(SystemsRunner));
+                        continue;
+                    }
+                    var eventEntry = new EventEntry(body, isUpdate, channel, slot, $"{type.Name}.{method.Name}");
+
+                    switch (instance.UpdateType)
+                    {
+                        case UpdateType.Update: _eventUpdate.Add(eventEntry); break;
+                        case UpdateType.FixedUpdate: _eventFixedUpdate.Add(eventEntry); break;
+                        case UpdateType.LateUpdate: _eventLateUpdate.Add(eventEntry); break;
+                    }
+                }
 
                 foreach (var method in methods)
                 {
@@ -124,6 +175,29 @@ namespace EOS.Systems
         internal void Update(float deltaTime) => Run(_update, deltaTime);
         internal void FixedUpdate(float deltaTime) => Run(_fixedUpdate, deltaTime);
         internal void LateUpdate(float deltaTime) => Run(_lateUpdate, deltaTime);
+
+        internal void UpdateEvents(float deltaTime) => RunEvents(_eventUpdate, deltaTime);
+        internal void FixedUpdateEvents(float deltaTime) => RunEvents(_eventFixedUpdate, deltaTime);
+        internal void LateUpdateEvents(float deltaTime) => RunEvents(_eventLateUpdate, deltaTime);
+
+        void RunEvents(List<EventEntry> entries, float deltaTime)
+        {
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var entry = entries[i];
+                try
+                {
+                    if (entry.IsUpdate())
+                        using (EosProfiler.Sample(entry.Label))
+                            entry.Body(deltaTime);
+                }
+                catch (Exception ex)
+                {
+                    EosLog.Error($"{entry.Label} threw: {ex.InnerException?.Message ?? ex.Message}", nameof(SystemsRunner));
+                }
+                finally { entry.Channel.Advance(entry.Slot); }
+            }
+        }
 
         void Run(List<SystemEntry> systems, float deltaTime)
         {

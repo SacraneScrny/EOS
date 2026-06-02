@@ -6,6 +6,7 @@ using System.Reflection;
 using EOS.Attributes;
 using EOS.Core;
 using EOS.Entities;
+using EOS.Events;
 using EOS.Logging;
 using EOS.Objects;
 using EOS.Storage;
@@ -16,6 +17,7 @@ namespace EOS.Systems
     public partial class SystemsRunner : WorldBound
     {
         const string EXECUTE_METHOD = "Execute";
+        const string EVENT_EXECUTE_METHOD = "EventExecute";
         const string GET = "Get";
         const string HAS = "Has";
         const string GET_OWNER = "GetOwner";
@@ -107,6 +109,59 @@ namespace EOS.Systems
                 entityParamIndex, deltaTimeParamIndex,
                 includeStorages, includeHasMethods,
                 excludeStorages, excludeHasMethods, tagFilter), false);
+        }
+
+        (Action<float> body, IEventChannel channel, int slot) BuildEventQuery(object instance, MethodInfo method)
+        {
+            var parameters = method.GetParameters();
+            int eventParamIndex = -1;
+            int deltaTimeParamIndex = -1;
+            Type eventType = null;
+
+            foreach (var p in parameters)
+            {
+                if (p.ParameterType == typeof(float))
+                    deltaTimeParamIndex = p.Position;
+                else if (p.ParameterType.IsValueType && p.ParameterType != typeof(EosEntity))
+                {
+                    if (eventType != null)
+                        throw new Exception($"EventExecute accepts a single event parameter, found {eventType.Name} and {p.ParameterType.Name}");
+                    eventType = p.ParameterType;
+                    eventParamIndex = p.Position;
+                }
+                else
+                    throw new Exception($"Unsupported parameter type {p.ParameterType.Name} in EventExecute");
+            }
+
+            if (eventType == null)
+                throw new Exception("EventExecute requires one struct event parameter");
+
+            var channel = World.Events.ChannelFor(eventType)
+                ?? throw new Exception($"Could not resolve event channel for {eventType.Name}");
+
+            int slot = channel.RegisterConsumer();
+            int evPos = eventParamIndex;
+            int dtPos = deltaTimeParamIndex;
+            int length = parameters.Length;
+
+            Action<float> body = deltaTime =>
+            {
+                ulong cursor = channel.CursorOf(slot);
+                if (channel.MaxSeq <= cursor) return;
+
+                var args = new object[length];
+                if (dtPos != -1) args[dtPos] = deltaTime;
+
+                int count = channel.LiveCount;
+                for (int i = 0; i < count; i++)
+                {
+                    if (channel.SeqAt(i) <= cursor) continue;
+                    args[evPos] = channel.BoxedAt(i);
+                    method.Invoke(instance, args);
+                }
+            };
+
+            return (body, channel, slot);
         }
 
         TagFilter BuildTagFilter(MethodInfo method)
