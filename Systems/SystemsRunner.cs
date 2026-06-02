@@ -155,6 +155,15 @@ namespace EOS.Systems
             }
         }
 
+        internal void DebugDraw()
+        {
+            for (int i = 0; i < _all.Count; i++)
+            {
+                try { _all[i].OnDebugDraw(); }
+                catch (Exception ex) { EosLog.Error($"{_all[i].GetType().Name}.OnDebugDraw threw: {ex.Message}", nameof(SystemsRunner)); }
+            }
+        }
+
         public T GetSystem<T>() where T : EosSystem => _typeToSystem.TryGetValue(typeof(T), out var system) ? (T)system : null;
         public IEnumerable<EosSystem> All => _all;
     }

@@ -240,6 +240,19 @@ namespace EOS.Core
             }
         }
 
+        public void DebugDraw()
+        {
+            if (IsDisposed) return;
+            if (!IsEnabled) return;
+            BeginIteration();
+            try
+            {
+                Objects.DebugDraw();
+                Systems.DebugDraw();
+            }
+            finally { EndIteration(); }
+        }
+
         public void Dispose()
         {
             if (IsDisposed) return;

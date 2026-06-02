@@ -116,3 +116,9 @@ Backends:
 - `AggregatedProfilerBackend` — accumulates ticks/calls per label via `Stopwatch`; `Dump(reset = true)` returns a formatted report string (route it through `EosLog` or `Console`).
 
 To instrument manually: `using (EosProfiler.Sample("MyChunk")) { ... }` or paired `EosProfiler.Begin/End`. The Unity bridge plugs in its own backend (`Begin → ProfilerMarker/Profiler.BeginSample`, `End → End`) without touching the core.
+
+### Debug draw
+
+The core stays Unity-free, so it owns no drawing API — only the dispatch hook. `EosObject` exposes `protected virtual void OnDebugDraw()` and `EosSystem` exposes `public virtual void OnDebugDraw()`; both are empty by default. Override them and draw with whatever the consumer assembly has (e.g. `UnityEngine.Gizmos`), since gameplay systems/objects live in the Unity-referencing assembly, not the framework.
+
+The trigger is **not** overridable — it is a call site symmetric to `Universe.Update`: the Unity bridge calls `Universe.DebugDraw()` from its `MonoBehaviour.OnDrawGizmos()`. That fans out `Universe.DebugDraw → World.DebugDraw → Objects.DebugDraw` (initialized objects) `+ Systems.DebugDraw` (all systems), each call wrapped in `try/catch + EosLog.Error` so one bad draw can't kill the pass. `World.DebugDraw` runs inside the iteration guard, so accidental structural changes during a draw are caught by `StructuralChangePolicy`.
