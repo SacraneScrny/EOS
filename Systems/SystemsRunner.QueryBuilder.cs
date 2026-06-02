@@ -196,6 +196,38 @@ namespace EOS.Systems
             return result;
         }
 
+        Func<EosEntity, bool> BuildTagMatch(MethodInfo method)
+        {
+            var filter = BuildTagFilter(method);
+            if (filter.IsNone) return null;
+            return filter.Matches;
+        }
+
+        IIndexedStorage[] ResolveIndexedStorages(List<Type> types)
+        {
+            var list = new List<IIndexedStorage>(types.Count);
+            for (int i = 0; i < types.Count; i++)
+                if (ResolveConcreteStorage(types[i]) is IIndexedStorage indexed)
+                    list.Add(indexed);
+            return list.ToArray();
+        }
+
+        List<Type> CollectIncludeTypes(MethodInfo method)
+        {
+            var types = new List<Type>();
+            foreach (var attr in method.GetCustomAttributes<IncludeAttribute>(true))
+                types.AddRange(attr.Types);
+            return types;
+        }
+
+        List<Type> CollectExcludeTypes(MethodInfo method)
+        {
+            var types = new List<Type>();
+            foreach (var attr in method.GetCustomAttributes<ExcludeAttribute>(true))
+                types.AddRange(attr.Types);
+            return types;
+        }
+
         Action<float, ulong> BuildConcreteQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
             List<(int position, Type type, Channel channel, bool optional)> concreteParams,

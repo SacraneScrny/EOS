@@ -36,6 +36,9 @@ namespace EOS.CodeGen
             var components = new HashSet<Type>();
 
             var entries = new StringBuilder();
+            var binds = new StringBuilder();
+            int bindId = 0;
+
             foreach (var type in systems)
             {
                 var name = CSharpName(type);
@@ -46,28 +49,31 @@ namespace EOS.CodeGen
 
                 CollectComponents(methods, components);
 
+                var invokers = new List<(string key, string lambda)>();
+                var bodies = new List<(string key, string bind)>();
+
+                foreach (var method in methods)
+                {
+                    if (!CanInvoke(method)) continue;
+
+                    var key = SystemSignature.Of(method);
+                    if (method.Name == "Execute" && SystemShape.IsTypedEligible(method))
+                    {
+                        var bindName = "Bind_" + bindId++;
+                        EmitBind(binds, bindName, name, method);
+                        bodies.Add((key, bindName));
+                    }
+                    else
+                    {
+                        invokers.Add((key, InvokerLambda(name, method)));
+                    }
+                }
+
                 entries.Append("            systems.Add(new global::EOS.CodeGen.GeneratedSystem(\n");
                 entries.Append("                typeof(").Append(name).Append("),\n");
                 entries.Append("                () => new ").Append(name).Append("(),\n");
-
-                var invokable = methods.Where(CanInvoke).ToArray();
-                if (invokable.Length == 0)
-                {
-                    entries.Append("                null));\n");
-                }
-                else
-                {
-                    entries.Append("                new global::System.Collections.Generic.Dictionary<string, global::EOS.CodeGen.SystemInvoker>\n");
-                    entries.Append("                {\n");
-                    foreach (var method in invokable)
-                    {
-                        var key = Literal(SystemSignature.Of(method));
-                        entries.Append("                    [").Append(key).Append("] = (s, a) => ((")
-                            .Append(name).Append(")s).").Append(method.Name).Append('(')
-                            .Append(Arguments(method)).Append("),\n");
-                    }
-                    entries.Append("                }));\n");
-                }
+                AppendDictionary(entries, "global::EOS.CodeGen.SystemInvoker", invokers, ",\n");
+                AppendDictionary(entries, "global::EOS.CodeGen.SystemBodyBinder", bodies, "));\n");
             }
 
             var preserve = new StringBuilder();
@@ -96,6 +102,11 @@ namespace EOS.CodeGen
             sb.Append("        {\n");
             sb.Append(preserve);
             sb.Append("        }\n");
+            if (binds.Length > 0)
+            {
+                sb.Append('\n');
+                sb.Append(binds);
+            }
             sb.Append("    }\n");
             sb.Append("}\n\n");
             sb.Append("#if !NET5_0_OR_GREATER && !EOS_NO_MODULE_INITIALIZER_POLYFILL\n");
@@ -105,6 +116,100 @@ namespace EOS.CodeGen
             sb.Append("    internal sealed class ModuleInitializerAttribute : global::System.Attribute { }\n");
             sb.Append("}\n");
             sb.Append("#endif\n");
+            return sb.ToString();
+        }
+
+        static void AppendDictionary(StringBuilder sb, string valueType, List<(string key, string value)> items, string tail)
+        {
+            if (items.Count == 0)
+            {
+                sb.Append("                null").Append(tail);
+                return;
+            }
+
+            sb.Append("                new global::System.Collections.Generic.Dictionary<string, ").Append(valueType).Append(">\n");
+            sb.Append("                {\n");
+            foreach (var (key, value) in items)
+                sb.Append("                    [").Append(Literal(key)).Append("] = ").Append(value).Append(",\n");
+            sb.Append("                }").Append(tail);
+        }
+
+        static void EmitBind(StringBuilder sb, string bindName, string systemName, MethodInfo method)
+        {
+            var parameters = SystemShape.Parameters(method);
+
+            var concrete = new List<(QueryParam param, int index)>();
+            var concreteByPosition = new Dictionary<int, int>();
+            foreach (var p in parameters)
+            {
+                if (!p.IsConcrete) continue;
+                int index = concrete.Count;
+                concrete.Add((p, index));
+                concreteByPosition[p.Position] = index;
+            }
+
+            var mandatory = concrete.Where(c => !c.param.Optional).ToList();
+
+            sb.Append("        static global::System.Action<float, ulong> ").Append(bindName).Append("(\n");
+            sb.Append("            global::EOS.Systems.EosSystem system,\n");
+            sb.Append("            global::EOS.Core.World world,\n");
+            sb.Append("            global::EOS.Storage.IIndexedStorage[] include,\n");
+            sb.Append("            global::EOS.Storage.IIndexedStorage[] exclude,\n");
+            sb.Append("            global::System.Func<global::EOS.Entities.EosEntity, bool> tagMatch)\n");
+            sb.Append("        {\n");
+            sb.Append("            var self = (").Append(systemName).Append(")system;\n");
+            foreach (var (param, index) in concrete)
+                sb.Append("            var s").Append(index).Append(" = world.ObjectsStorages.Get<").Append(CSharpName(param.Type)).Append(">();\n");
+            sb.Append("            return (dt, _) =>\n");
+            sb.Append("            {\n");
+
+            if (mandatory.Count == 1)
+            {
+                sb.Append("                global::EOS.Storage.IIndexedStorage pivot = s").Append(mandatory[0].index).Append(";\n");
+            }
+            else
+            {
+                sb.Append("                global::EOS.Storage.IIndexedStorage pivot = s").Append(mandatory[0].index).Append(";\n");
+                sb.Append("                int min = s").Append(mandatory[0].index).Append(".Count;\n");
+                for (int k = 1; k < mandatory.Count; k++)
+                {
+                    int mi = mandatory[k].index;
+                    sb.Append("                if (s").Append(mi).Append(".Count < min) { min = s").Append(mi).Append(".Count; pivot = s").Append(mi).Append("; }\n");
+                }
+            }
+
+            sb.Append("                int count = pivot.Count;\n");
+            sb.Append("                for (int i = 0; i < count; i++)\n");
+            sb.Append("                {\n");
+            sb.Append("                    if (!pivot.IsReady(i)) continue;\n");
+            sb.Append("                    var e = pivot.GetOwner(i);\n");
+            foreach (var (param, index) in concrete)
+            {
+                if (param.Optional)
+                    sb.Append("                    s").Append(index).Append(".TryGet(e, out var c").Append(index).Append(");\n");
+                else
+                    sb.Append("                    if (!s").Append(index).Append(".TryGet(e, out var c").Append(index).Append(")) continue;\n");
+            }
+            sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.IncludeMatch(include, e)) continue;\n");
+            sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.ExcludeMatch(exclude, e)) continue;\n");
+            sb.Append("                    if (tagMatch != null && !tagMatch(e)) continue;\n");
+            sb.Append("                    self.").Append(method.Name).Append('(').Append(CallArguments(parameters, concreteByPosition)).Append(");\n");
+            sb.Append("                }\n");
+            sb.Append("            };\n");
+            sb.Append("        }\n");
+        }
+
+        static string CallArguments(List<QueryParam> parameters, Dictionary<int, int> concreteByPosition)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < parameters.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var p = parameters[i];
+                if (p.IsEntity) sb.Append('e');
+                else if (p.IsDelta) sb.Append("dt");
+                else sb.Append('c').Append(concreteByPosition[p.Position]);
+            }
             return sb.ToString();
         }
 
@@ -166,15 +271,17 @@ namespace EOS.CodeGen
         static bool CanInvoke(MethodInfo method)
             => method.IsPublic || method.IsAssembly || method.IsFamilyOrAssembly;
 
-        static string Arguments(MethodInfo method)
+        static string InvokerLambda(string systemName, MethodInfo method)
         {
             var parameters = method.GetParameters();
             var sb = new StringBuilder();
+            sb.Append("(s, a) => ((").Append(systemName).Append(")s).").Append(method.Name).Append('(');
             for (int i = 0; i < parameters.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
                 sb.Append('(').Append(CSharpName(parameters[i].ParameterType)).Append(")a[").Append(i).Append(']');
             }
+            sb.Append(')');
             return sb.ToString();
         }
 

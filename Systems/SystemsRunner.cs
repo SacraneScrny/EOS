@@ -165,11 +165,24 @@ namespace EOS.Systems
 
                 foreach (var method in methods)
                 {
+                    var sig = SystemSignature.Of(method);
                     Action<float, ulong> body;
                     bool reactive;
                     try
                     {
-                        (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(SystemSignature.Of(method)));
+                        var binder = generated?.GetBody(sig);
+                        if (binder != null && SystemShape.IsTypedEligible(method))
+                        {
+                            var include = ResolveIndexedStorages(CollectIncludeTypes(method));
+                            var exclude = ResolveIndexedStorages(CollectExcludeTypes(method));
+                            var tagMatch = BuildTagMatch(method);
+                            body = binder(instance, World, include, exclude, tagMatch);
+                            reactive = false;
+                        }
+                        else
+                        {
+                            (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(sig));
+                        }
                     }
                     catch (Exception ex)
                     {

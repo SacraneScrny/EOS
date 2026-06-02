@@ -21,6 +21,8 @@ namespace EOS.Tags
             _one = one;
         }
 
+        public bool IsNone => _tags == null;
+
         public bool Matches(EosEntity entity)
         {
             if (_tags == null) return true;
