@@ -104,3 +104,15 @@ ClearAllRecent → BeforeAll.Execute → BeforeUpdate.Execute
 ### Logging
 
 `EosLog` is a static ring-buffer (128 entries). Attach a handler via `EosLog.OnLog`. Use `EosLog.Debug` (DEBUG-only), `EosLog.Warning`, `EosLog.Error`. Always pass `nameof(TheClass)` as the source argument.
+
+### Profiling
+
+`EosProfiler` mirrors the `EosLog` pattern: a static facade over a swappable `IEosProfilerBackend` (`Begin(label)` / `End()`). It is **off by default** (`EosProfiler.Enabled == false`, `Backend == NullProfilerBackend.Instance`) so it adds no overhead until explicitly enabled.
+
+`World.Update/FixedUpdate/LateUpdate` and every system are auto-instrumented: the frame loop wraps its phases (`World.Update`, `InitializeSystems`, `Systems.Update`, `Objects.Update`, …) and `SystemsRunner.Run` wraps each system body in `EosProfiler.Sample(label)`, where `label` is the system type name. `Sample` returns a `readonly struct Scope` (no allocation) whose `Dispose` ends the span, so spans stay balanced even if the body throws.
+
+Backends:
+- `NullProfilerBackend` — no-op default.
+- `AggregatedProfilerBackend` — accumulates ticks/calls per label via `Stopwatch`; `Dump(reset = true)` returns a formatted report string (route it through `EosLog` or `Console`).
+
+To instrument manually: `using (EosProfiler.Sample("MyChunk")) { ... }` or paired `EosProfiler.Begin/End`. The Unity bridge plugs in its own backend (`Begin → ProfilerMarker/Profiler.BeginSample`, `End → End`) without touching the core.
