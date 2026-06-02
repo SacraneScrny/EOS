@@ -13,6 +13,11 @@ namespace EOS.Core
 {
     public interface IReadOnlyWorld
     {
+        int Id { get; }
+        string Key { get; }
+        ulong Version { get; }
+        ulong Frame { get; }
+
         bool IsDisposed { get; }
         bool IsEnabled { get; }
         bool IsManualUpdate { get; }
