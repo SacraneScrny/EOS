@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 
+using EOS.Core;
 using EOS.Entities;
 using EOS.Extensions;
 
@@ -86,6 +87,8 @@ namespace EOS.Objects
         protected bool TryGet<T>(out T result) where T : EosObject, new() => Entity.TryGet(out result);
         protected bool Has<T>() where T : EosObject, new() => Entity.Has<T>();
         protected bool Remove<T>() where T : EosObject, new() => Entity.Remove<T>();
+
+        protected IServiceLocator Services => Entity.World.Services;
 
         protected void Bump()
         {

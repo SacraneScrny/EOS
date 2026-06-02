@@ -114,6 +114,10 @@ namespace EOS.Core
         public IWorldContext Context => _context;
         internal WorldContext LocalContext => _context;
 
+        readonly ServiceContainer _services = new();
+        public IServiceLocator Services => _services;
+        public IServiceRegistry ServiceRegistry => _services;
+
         #region ECB
         EntityCommandBuffer _beforeAll;
         public IReadOnlyEntityCommandBuffer BeforeAll => _beforeAll;
@@ -182,6 +186,7 @@ namespace EOS.Core
             Events.Init(this);
             Systems.Init(this);
             _context.Init(this);
+            _services.Init(this);
 
             IsEnabled = true;
         }
@@ -286,6 +291,7 @@ namespace EOS.Core
             Objects.Reset();
             SystemGroups.Reset();
             _context.Reset();
+            _services.Clear();
         }
 
         public bool Equals(World other)

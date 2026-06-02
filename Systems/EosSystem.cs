@@ -11,6 +11,8 @@ namespace EOS.Systems
 
         protected LocalSystemContext Context => new(World.LocalContext, this);
 
+        protected IServiceLocator Services => World.Services;
+
         public virtual UpdateType UpdateType => UpdateType.Update;
 
         public bool IsUpdate() => IsEnabled && UpdateWhen();
