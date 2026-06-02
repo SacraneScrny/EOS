@@ -84,6 +84,7 @@ namespace EOS.Storage
             result = null;
             return false;
         }
+        public T At(int index) => _data[index];
         public bool Has(EosEntity entity) => IndexOf(entity) >= 0;
         public bool HasReady(EosEntity entity)
         {

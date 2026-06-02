@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 
 using EOS.Attributes;
+using EOS.Entities;
 using EOS.Objects;
 using EOS.Systems;
 
@@ -38,6 +39,7 @@ namespace EOS.CodeGen
             var entries = new StringBuilder();
             var binds = new StringBuilder();
             int bindId = 0;
+            int eventBindId = 0;
 
             foreach (var type in systems)
             {
@@ -51,6 +53,7 @@ namespace EOS.CodeGen
 
                 var invokers = new List<(string key, string lambda)>();
                 var bodies = new List<(string key, string bind)>();
+                var eventBodies = new List<(string key, string bind)>();
 
                 foreach (var method in methods)
                 {
@@ -64,6 +67,12 @@ namespace EOS.CodeGen
                         EmitBind(binds, bindName, name, method);
                         bodies.Add((key, bindName));
                     }
+                    else if (method.Name == "EventExecute" && CanTypeEvent(method))
+                    {
+                        var bindName = "EventBind_" + eventBindId++;
+                        EmitEventBind(binds, bindName, name, method);
+                        eventBodies.Add((key, bindName));
+                    }
                     else
                     {
                         invokers.Add((key, InvokerLambda(name, method)));
@@ -74,7 +83,8 @@ namespace EOS.CodeGen
                 entries.Append("                typeof(").Append(name).Append("),\n");
                 entries.Append("                () => new ").Append(name).Append("(),\n");
                 AppendDictionary(entries, "global::EOS.CodeGen.SystemInvoker", invokers, ",\n");
-                AppendDictionary(entries, "global::EOS.CodeGen.SystemBodyBinder", bodies, "));\n");
+                AppendDictionary(entries, "global::EOS.CodeGen.SystemBodyBinder", bodies, ",\n");
+                AppendDictionary(entries, "global::EOS.CodeGen.EventBodyBinder", eventBodies, "));\n");
             }
 
             var preserve = new StringBuilder();
@@ -167,13 +177,22 @@ namespace EOS.CodeGen
                 }
             }
 
-            var mandatoryConcrete = concrete.Where(c => !c.p.Optional).ToList();
-            var mandatoryInterface = ifaces.Where(f => !f.Param.Optional).ToList();
-            bool hasEntity = parameters.Any(p => p.IsEntity);
+            bool reactive = parameters.Any(p => p.Reactive);
 
-            bool concreteDriver = mandatoryConcrete.Count > 0;
-            bool interfaceDriver = !concreteDriver && mandatoryInterface.Count > 0;
-            bool entityScan = !concreteDriver && !interfaceDriver && hasEntity;
+            int driverConcrete = -1;
+            int driverIface = -1;
+            if (reactive)
+            {
+                foreach (var c in concrete)
+                    if (c.p.Reactive && !c.p.Optional) { driverConcrete = c.index; break; }
+                if (driverConcrete < 0)
+                    foreach (var f in ifaces)
+                        if (f.Param.Reactive && !f.Param.Optional) { driverIface = f.Index; break; }
+            }
+
+            bool interfaceDriver = reactive
+                ? driverConcrete < 0 && driverIface >= 0
+                : !concrete.Any(c => !c.p.Optional) && ifaces.Any(f => !f.Param.Optional);
 
             sb.Append("        static global::System.Action<float, ulong> ").Append(bindName).Append("(\n");
             sb.Append("            global::EOS.Systems.EosSystem system,\n");
@@ -199,8 +218,35 @@ namespace EOS.CodeGen
             if (interfaceDriver)
                 sb.Append("            var seen = new global::System.Collections.Generic.HashSet<int>();\n");
 
-            sb.Append("            return (dt, _) =>\n");
-            sb.Append("            {\n");
+            if (reactive)
+            {
+                sb.Append("            return (dt, cursor) =>\n");
+                sb.Append("            {\n");
+                if (driverConcrete >= 0)
+                    EmitReactiveConcreteDriver(sb, method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition, driverConcrete);
+                else
+                    EmitReactiveInterfaceDriver(sb, method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition, driverIface);
+                sb.Append("            };\n");
+            }
+            else
+            {
+                sb.Append("            return (dt, _) =>\n");
+                sb.Append("            {\n");
+                EmitNonReactive(sb, method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition, interfaceDriver);
+                sb.Append("            };\n");
+            }
+
+            sb.Append("        }\n");
+        }
+
+        static void EmitNonReactive(
+            StringBuilder sb, MethodInfo method, List<QueryParam> parameters,
+            List<(QueryParam p, int index)> concrete, Dictionary<int, int> concreteByPosition,
+            List<Iface> ifaces, Dictionary<int, int> ifaceByPosition, bool interfaceDriver)
+        {
+            var mandatoryConcrete = concrete.Where(c => !c.p.Optional).ToList();
+            bool concreteDriver = mandatoryConcrete.Count > 0;
+            bool entityScan = !concreteDriver && !interfaceDriver && parameters.Any(p => p.IsEntity);
 
             if (concreteDriver)
             {
@@ -228,8 +274,9 @@ namespace EOS.CodeGen
             }
             else if (interfaceDriver)
             {
+                int driverIndex = ifaces.First(f => !f.Param.Optional).Index;
                 sb.Append("                seen.Clear();\n");
-                sb.Append("                var driver = impl").Append(mandatoryInterface[0].Index).Append(";\n");
+                sb.Append("                var driver = impl").Append(driverIndex).Append(";\n");
                 sb.Append("                for (int di = 0; di < driver.Length; di++)\n");
                 sb.Append("                {\n");
                 sb.Append("                    var drv = driver[di];\n");
@@ -254,9 +301,223 @@ namespace EOS.CodeGen
             {
                 sb.Append("                self.").Append(method.Name).Append('(').Append(CallArguments(parameters, concreteByPosition, ifaceByPosition)).Append(");\n");
             }
+        }
 
+        static void EmitReactiveConcreteDriver(
+            StringBuilder sb, MethodInfo method, List<QueryParam> parameters,
+            List<(QueryParam p, int index)> concrete, Dictionary<int, int> concreteByPosition,
+            List<Iface> ifaces, Dictionary<int, int> ifaceByPosition, int driverConcrete)
+        {
+            var dp = concrete.First(c => c.index == driverConcrete).p;
+            string sd = "s" + driverConcrete;
+            sb.Append("                if (").Append(MaxExpr(sd, dp)).Append(" <= cursor) return;\n");
+            sb.Append("                int count = ").Append(sd).Append(".Count;\n");
+            sb.Append("                for (int i = 0; i < count; i++)\n");
+            sb.Append("                {\n");
+            sb.Append("                    if (!").Append(sd).Append(".IsReady(i)) continue;\n");
+            sb.Append("                    if (").Append(VerExpr(sd, "i", dp)).Append(" <= cursor) continue;\n");
+            sb.Append("                    var e = ").Append(sd).Append(".GetOwner(i);\n");
+            sb.Append("                    var c").Append(driverConcrete).Append(" = ").Append(sd).Append(".At(i);\n");
+            EmitReactivePerEntity(sb, "                    ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition, driverConcrete);
+            sb.Append("                }\n");
+        }
+
+        static void EmitReactiveInterfaceDriver(
+            StringBuilder sb, MethodInfo method, List<QueryParam> parameters,
+            List<(QueryParam p, int index)> concrete, Dictionary<int, int> concreteByPosition,
+            List<Iface> ifaces, Dictionary<int, int> ifaceByPosition, int driverIface)
+        {
+            var dp = ifaces.First(f => f.Index == driverIface).Param;
+            sb.Append("                seen.Clear();\n");
+            sb.Append("                var driver = impl").Append(driverIface).Append(";\n");
+            sb.Append("                for (int di = 0; di < driver.Length; di++)\n");
+            sb.Append("                {\n");
+            sb.Append("                    var drv = driver[di];\n");
+            sb.Append("                    if (").Append(MaxExpr("drv", dp)).Append(" <= cursor) continue;\n");
+            sb.Append("                    int dcount = drv.Count;\n");
+            sb.Append("                    for (int i = 0; i < dcount; i++)\n");
+            sb.Append("                    {\n");
+            sb.Append("                        if (!drv.IsReady(i)) continue;\n");
+            sb.Append("                        if (").Append(VerExpr("drv", "i", dp)).Append(" <= cursor) continue;\n");
+            sb.Append("                        var e = drv.GetOwner(i);\n");
+            sb.Append("                        if (!seen.Add(e.Id)) continue;\n");
+            EmitReactivePerEntity(sb, "                        ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition, -1);
+            sb.Append("                    }\n");
+            sb.Append("                }\n");
+        }
+
+        static void EmitReactivePerEntity(
+            StringBuilder sb, string indent, MethodInfo method, List<QueryParam> parameters,
+            List<(QueryParam p, int index)> concrete, Dictionary<int, int> concreteByPosition,
+            List<Iface> ifaces, Dictionary<int, int> ifaceByPosition, int driverConcrete)
+        {
+            foreach (var (cp, idx) in concrete)
+            {
+                if (idx == driverConcrete) continue;
+                string s = "s" + idx;
+                if (cp.Reactive)
+                {
+                    sb.Append(indent).Append("int k").Append(idx).Append(" = ").Append(s).Append(".IndexOf(e);\n");
+                    if (cp.Optional)
+                    {
+                        sb.Append(indent).Append(CSharpName(cp.Type)).Append(" c").Append(idx).Append(" = null;\n");
+                        sb.Append(indent).Append("if (k").Append(idx).Append(" >= 0 && ").Append(s).Append(".IsReady(k").Append(idx).Append("))\n");
+                        sb.Append(indent).Append("{\n");
+                        sb.Append(indent).Append("    if (").Append(VerExpr(s, "k" + idx, cp)).Append(" <= cursor) continue;\n");
+                        sb.Append(indent).Append("    c").Append(idx).Append(" = ").Append(s).Append(".At(k").Append(idx).Append(");\n");
+                        sb.Append(indent).Append("}\n");
+                    }
+                    else
+                    {
+                        sb.Append(indent).Append("if (k").Append(idx).Append(" < 0 || !").Append(s).Append(".IsReady(k").Append(idx).Append(")) continue;\n");
+                        sb.Append(indent).Append("if (").Append(VerExpr(s, "k" + idx, cp)).Append(" <= cursor) continue;\n");
+                        sb.Append(indent).Append("var c").Append(idx).Append(" = ").Append(s).Append(".At(k").Append(idx).Append(");\n");
+                    }
+                }
+                else
+                {
+                    if (cp.Optional)
+                        sb.Append(indent).Append(s).Append(".TryGetReady(e, out var c").Append(idx).Append(");\n");
+                    else
+                        sb.Append(indent).Append("if (!").Append(s).Append(".TryGetReady(e, out var c").Append(idx).Append(")) continue;\n");
+                }
+            }
+            sb.Append(indent).Append("if (!global::EOS.CodeGen.GeneratedQuery.IncludeMatch(include, e)) continue;\n");
+            sb.Append(indent).Append("if (!global::EOS.CodeGen.GeneratedQuery.ExcludeMatch(exclude, e)) continue;\n");
+            sb.Append(indent).Append("if (tagMatch != null && !tagMatch(e)) continue;\n");
+            EmitReactiveFanout(sb, indent, 0, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+        }
+
+        static void EmitReactiveFanout(
+            StringBuilder sb, string indent, int fanoutIndex, MethodInfo method, List<QueryParam> parameters,
+            Dictionary<int, int> concreteByPosition, List<Iface> ifaces, Dictionary<int, int> ifaceByPosition)
+        {
+            if (fanoutIndex == ifaces.Count)
+            {
+                sb.Append(indent).Append("self.").Append(method.Name).Append('(').Append(CallArguments(parameters, concreteByPosition, ifaceByPosition)).Append(");\n");
+                return;
+            }
+
+            var f = ifaces[fanoutIndex];
+            int idx = f.Index;
+            string type = CSharpName(f.Param.Type);
+            string inner = indent + "    ";
+
+            if (f.Param.Each)
+            {
+                if (f.Param.Optional)
+                    sb.Append(indent).Append("bool any").Append(idx).Append(" = false;\n");
+
+                sb.Append(indent).Append("for (int j").Append(idx).Append(" = 0; j").Append(idx).Append(" < impl").Append(idx).Append(".Length; j").Append(idx).Append("++)\n");
+                sb.Append(indent).Append("{\n");
+                sb.Append(inner).Append("var st").Append(idx).Append(" = impl").Append(idx).Append("[j").Append(idx).Append("];\n");
+                sb.Append(inner).Append("int ik").Append(idx).Append(" = st").Append(idx).Append(".IndexOf(e);\n");
+                sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0 || !st").Append(idx).Append(".IsReady(ik").Append(idx).Append(")) continue;\n");
+                if (f.Param.Reactive)
+                    sb.Append(inner).Append("if (").Append(VerExpr("st" + idx, "ik" + idx, f.Param)).Append(" <= cursor) continue;\n");
+                if (f.Param.Optional)
+                    sb.Append(inner).Append("any").Append(idx).Append(" = true;\n");
+                sb.Append(inner).Append("var v").Append(idx).Append(" = (").Append(type).Append(")st").Append(idx).Append(".GetAt(ik").Append(idx).Append(");\n");
+                EmitReactiveFanout(sb, inner, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                sb.Append(indent).Append("}\n");
+
+                if (f.Param.Optional)
+                {
+                    sb.Append(indent).Append("if (!any").Append(idx).Append(")\n");
+                    sb.Append(indent).Append("{\n");
+                    sb.Append(inner).Append(type).Append(" v").Append(idx).Append(" = null;\n");
+                    EmitReactiveFanout(sb, inner, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                    sb.Append(indent).Append("}\n");
+                }
+            }
+            else
+            {
+                sb.Append(indent).Append(type).Append(" v").Append(idx).Append(" = null;\n");
+                sb.Append(indent).Append("for (int j").Append(idx).Append(" = 0; j").Append(idx).Append(" < impl").Append(idx).Append(".Length; j").Append(idx).Append("++)\n");
+                sb.Append(indent).Append("{\n");
+                sb.Append(inner).Append("var st").Append(idx).Append(" = impl").Append(idx).Append("[j").Append(idx).Append("];\n");
+                sb.Append(inner).Append("int ik").Append(idx).Append(" = st").Append(idx).Append(".IndexOf(e);\n");
+                sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0 || !st").Append(idx).Append(".IsReady(ik").Append(idx).Append(")) continue;\n");
+                if (f.Param.Reactive)
+                    sb.Append(inner).Append("if (").Append(VerExpr("st" + idx, "ik" + idx, f.Param)).Append(" <= cursor) continue;\n");
+                sb.Append(inner).Append("v").Append(idx).Append(" = (").Append(type).Append(")st").Append(idx).Append(".GetAt(ik").Append(idx).Append("); break;\n");
+                sb.Append(indent).Append("}\n");
+
+                if (f.Param.Optional)
+                {
+                    EmitReactiveFanout(sb, indent, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                }
+                else
+                {
+                    sb.Append(indent).Append("if (v").Append(idx).Append(" != null)\n");
+                    sb.Append(indent).Append("{\n");
+                    EmitReactiveFanout(sb, inner, fanoutIndex + 1, method, parameters, concreteByPosition, ifaces, ifaceByPosition);
+                    sb.Append(indent).Append("}\n");
+                }
+            }
+        }
+
+        static string MaxExpr(string storage, QueryParam p)
+            => storage + (p.Bumped ? ".MaxMarkVersion" : ".MaxAddVersion");
+
+        static string VerExpr(string storage, string indexExpr, QueryParam p)
+            => storage + (p.Bumped ? ".MarkVersionAt(" : ".AddVersionAt(") + indexExpr + ")";
+
+        static bool CanTypeEvent(MethodInfo method)
+        {
+            if (method.Name != "EventExecute") return false;
+
+            Type eventType = null;
+            foreach (var p in method.GetParameters())
+            {
+                var t = p.ParameterType;
+                if (t == typeof(float)) continue;
+                if (!t.IsValueType || t == typeof(EosEntity)) return false;
+                if (eventType != null) return false;
+                eventType = t;
+            }
+            return eventType != null && IsAccessible(eventType);
+        }
+
+        static void EmitEventBind(StringBuilder sb, string bindName, string systemName, MethodInfo method)
+        {
+            var parameters = method.GetParameters();
+            Type eventType = null;
+            foreach (var p in parameters)
+                if (p.ParameterType != typeof(float)) eventType = p.ParameterType;
+
+            sb.Append("        static global::EOS.CodeGen.EventBinding ").Append(bindName).Append("(\n");
+            sb.Append("            global::EOS.Systems.EosSystem system,\n");
+            sb.Append("            global::EOS.Core.World world)\n");
+            sb.Append("        {\n");
+            sb.Append("            var self = (").Append(systemName).Append(")system;\n");
+            sb.Append("            var ch = world.Events.Channel<").Append(CSharpName(eventType)).Append(">();\n");
+            sb.Append("            int slot = ch.RegisterConsumer();\n");
+            sb.Append("            global::System.Action<float> body = dt =>\n");
+            sb.Append("            {\n");
+            sb.Append("                ulong cursor = ch.CursorOf(slot);\n");
+            sb.Append("                if (ch.MaxSeq <= cursor) return;\n");
+            sb.Append("                int count = ch.LiveCount;\n");
+            sb.Append("                for (int i = 0; i < count; i++)\n");
+            sb.Append("                {\n");
+            sb.Append("                    if (ch.SeqAt(i) <= cursor) continue;\n");
+            sb.Append("                    var ev = ch.ValueAt(i);\n");
+            sb.Append("                    self.").Append(method.Name).Append('(').Append(EventCallArguments(parameters)).Append(");\n");
+            sb.Append("                }\n");
             sb.Append("            };\n");
+            sb.Append("            return new global::EOS.CodeGen.EventBinding(body, ch, slot);\n");
             sb.Append("        }\n");
+        }
+
+        static string EventCallArguments(ParameterInfo[] parameters)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(parameters[i].ParameterType == typeof(float) ? "dt" : "ev");
+            }
+            return sb.ToString();
         }
 
         static void EmitPerEntity(

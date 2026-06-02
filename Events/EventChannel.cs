@@ -7,7 +7,7 @@ namespace EOS.Events
     {
         struct Live
         {
-            public object Boxed;
+            public T Value;
             public ulong Seq;
             public ulong Frame;
         }
@@ -32,7 +32,8 @@ namespace EOS.Events
         }
 
         public int LiveCount => _count - _head;
-        public object BoxedAt(int index) => _live[_head + index].Boxed;
+        public object BoxedAt(int index) => _live[_head + index].Value;
+        public T ValueAt(int index) => _live[_head + index].Value;
         public ulong SeqAt(int index) => _live[_head + index].Seq;
 
         public int RegisterConsumer()
@@ -50,7 +51,7 @@ namespace EOS.Events
             EnsureLive(_count + _stagingCount);
             for (int i = 0; i < _stagingCount; i++)
             {
-                _live[_count].Boxed = _staging[i];
+                _live[_count].Value = _staging[i];
                 _live[_count].Seq = ++_seq;
                 _live[_count].Frame = frame;
                 _count++;
@@ -74,7 +75,7 @@ namespace EOS.Events
                 bool consumed = _live[_head].Seq <= minCur;
                 bool aged = maxAge > 0 && frame - _live[_head].Frame >= maxAge;
                 if (!consumed && !aged) break;
-                _live[_head].Boxed = null;
+                _live[_head].Value = default;
                 _head++;
             }
 
@@ -101,7 +102,7 @@ namespace EOS.Events
         {
             int n = _count - _head;
             if (n > 0) Array.Copy(_live, _head, _live, 0, n);
-            for (int i = n; i < _count; i++) _live[i].Boxed = null;
+            for (int i = n; i < _count; i++) _live[i].Value = default;
             _count = n;
             _head = 0;
         }

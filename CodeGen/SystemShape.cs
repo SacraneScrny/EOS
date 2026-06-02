@@ -18,9 +18,11 @@ namespace EOS.CodeGen
         public readonly bool IsDelta;
         public readonly bool Optional;
         public readonly bool Reactive;
+        public readonly bool Bumped;
+        public readonly bool Each;
         public readonly bool Unsupported;
 
-        public QueryParam(int position, Type type, bool isConcrete, bool isInterface, bool isEntity, bool isDelta, bool optional, bool reactive, bool unsupported)
+        public QueryParam(int position, Type type, bool isConcrete, bool isInterface, bool isEntity, bool isDelta, bool optional, bool reactive, bool bumped, bool each, bool unsupported)
         {
             Position = position;
             Type = type;
@@ -30,6 +32,8 @@ namespace EOS.CodeGen
             IsDelta = isDelta;
             Optional = optional;
             Reactive = reactive;
+            Bumped = bumped;
+            Each = each;
             Unsupported = unsupported;
         }
     }
@@ -42,7 +46,9 @@ namespace EOS.CodeGen
             foreach (var p in method.GetParameters())
             {
                 bool optional = p.GetCustomAttribute<OptionalAttribute>() != null;
-                bool reactive = p.GetCustomAttribute<NewAttribute>() != null || p.GetCustomAttribute<BumpedAttribute>() != null;
+                bool bumped = p.GetCustomAttribute<BumpedAttribute>() != null;
+                bool reactive = bumped || p.GetCustomAttribute<NewAttribute>() != null;
+                bool each = p.GetCustomAttribute<EachAttribute>() != null;
 
                 var type = p.ParameterType;
                 bool isEntity = type == typeof(EosEntity);
@@ -51,7 +57,7 @@ namespace EOS.CodeGen
                 bool isConcrete = !isEntity && !isDelta && !isInterface && typeof(EosObject).IsAssignableFrom(type);
                 bool unsupported = !isEntity && !isDelta && !isInterface && !isConcrete;
 
-                result.Add(new QueryParam(p.Position, type, isConcrete, isInterface, isEntity, isDelta, optional, reactive, unsupported));
+                result.Add(new QueryParam(p.Position, type, isConcrete, isInterface, isEntity, isDelta, optional, reactive, bumped, each, unsupported));
             }
             return result;
         }
@@ -70,11 +76,17 @@ namespace EOS.CodeGen
             bool anyMandatoryConcrete = false;
             bool anyMandatoryInterface = false;
             bool anyComponentOrInterface = false;
+            bool reactive = false;
+            bool reactiveDriver = false;
 
             foreach (var p in Parameters(method))
             {
                 if (p.Unsupported) return false;
-                if (p.Reactive) return false;
+                if (p.Reactive)
+                {
+                    reactive = true;
+                    if (!p.Optional && (p.IsConcrete || p.IsInterface)) reactiveDriver = true;
+                }
                 if (p.IsConcrete)
                 {
                     anyComponentOrInterface = true;
@@ -87,6 +99,7 @@ namespace EOS.CodeGen
                 }
             }
 
+            if (reactive) return reactiveDriver;
             return anyMandatoryConcrete || anyMandatoryInterface || !anyComponentOrInterface;
         }
     }

@@ -141,12 +141,26 @@ namespace EOS.Systems
 
                 foreach (var method in eventMethods)
                 {
+                    var sig = SystemSignature.Of(method);
                     Action<float> body;
                     IEventChannel channel;
                     int slot;
                     try
                     {
-                        (body, channel, slot) = BuildEventQuery(instance, method, generated?.GetInvoker(SystemSignature.Of(method)));
+                        var eventBinder = generated?.GetEventBody(sig);
+                        if (eventBinder != null)
+                        {
+                            var binding = eventBinder(instance, World);
+                            body = binding.Body;
+                            channel = binding.Channel;
+                            slot = binding.Slot;
+                        }
+                        else
+                        {
+                            if (generated != null)
+                                EosLog.Warning($"{type.Name}.{method.Name}: no generated typed event body, falling back to reflection (unsupported shape or stale registry — regenerate)", nameof(SystemsRunner));
+                            (body, channel, slot) = BuildEventQuery(instance, method, generated?.GetInvoker(sig));
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -177,7 +191,7 @@ namespace EOS.Systems
                             var exclude = ResolveIndexedStorages(CollectExcludeTypes(method));
                             var tagMatch = BuildTagMatch(method);
                             body = binder(instance, World, include, exclude, tagMatch);
-                            reactive = false;
+                            reactive = SystemShape.IsReactive(method);
                         }
                         else
                         {
