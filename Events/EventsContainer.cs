@@ -24,6 +24,8 @@ namespace EOS.Events
 
         public void Enqueue<T>(in T e) where T : struct => Get<T>().Enqueue(e);
 
+        public EventChannel<T> Channel<T>() where T : struct => Get<T>();
+
         internal IEventChannel ChannelFor(Type eventType)
         {
             if (_channels.TryGetValue(eventType, out var existing))

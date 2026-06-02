@@ -12,6 +12,8 @@ namespace EOS.Storage
         void MarkReady(EosEntity entity);
         void Bump(EosEntity entity);
         int IndexOf(EosEntity entity);
+        bool HasReady(EosEntity entity);
+        object TryGetReadyObject(EosEntity entity);
 
         ulong MaxAddVersion { get; }
         ulong MaxMarkVersion { get; }

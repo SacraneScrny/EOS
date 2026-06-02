@@ -84,7 +84,24 @@ namespace EOS.Storage
             result = null;
             return false;
         }
+        public T At(int index) => _data[index];
         public bool Has(EosEntity entity) => IndexOf(entity) >= 0;
+        public bool HasReady(EosEntity entity)
+        {
+            int i = IndexOf(entity);
+            return i >= 0 && IsReady(i);
+        }
+        public bool TryGetReady(EosEntity entity, out T result)
+        {
+            int i = IndexOf(entity);
+            if (i >= 0 && IsReady(i))
+            {
+                result = _data[i];
+                return true;
+            }
+            result = null;
+            return false;
+        }
         public EosEntity GetOwner(int index) =>
             new(_owners[index], _ownerVersions[index], World, World.Entities.GetName(_owners[index]));
 
@@ -186,6 +203,8 @@ namespace EOS.Storage
         object IIndexedStorage.GetAt(int index) => _data[index];
         object IIndexedStorage.TryGetObject(EosEntity entity)
             => TryGet(entity, out var result) ? result : null;
+        object IIndexedStorage.TryGetReadyObject(EosEntity entity)
+            => TryGetReady(entity, out var result) ? result : null;
         EosEntity IIndexedStorage.GetOwner(int index) => GetOwner(index);
         int IIndexedStorage.Count => Count;
     }

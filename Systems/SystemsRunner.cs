@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 
 using EOS.Attributes;
+using EOS.CodeGen;
 using EOS.Core;
 using EOS.Events;
 using EOS.Logging;
@@ -76,16 +77,39 @@ namespace EOS.Systems
             _eventFixedUpdate.Clear();
             _eventLateUpdate.Clear();
 
-            var types = AppDomain.CurrentDomain.GetAssemblies()
-                .SelectMany(a => a.GetTypes())
-                .Where(t => t.IsSubclassOf(typeof(EosSystem)) && !t.IsAbstract);
+            var sources = new List<(Type type, Func<EosSystem> factory, GeneratedSystem generated)>();
+            var provider = GeneratedSystems.Provider;
+            if (provider != null)
+            {
+                try { provider.PreserveStorages(World); }
+                catch (Exception ex) { EosLog.Error($"PreserveStorages threw: {ex.Message}", nameof(SystemsRunner)); }
 
-            foreach (var type in types)
+                var generated = provider.Systems;
+                for (int i = 0; i < generated.Count; i++)
+                {
+                    var entry = generated[i];
+                    sources.Add((entry.SystemType, entry.Create, entry));
+                }
+            }
+            else
+            {
+                var types = AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(a => a.GetTypes())
+                    .Where(t => t.IsSubclassOf(typeof(EosSystem)) && !t.IsAbstract);
+
+                foreach (var type in types)
+                {
+                    var captured = type;
+                    sources.Add((captured, () => (EosSystem)Activator.CreateInstance(captured), null));
+                }
+            }
+
+            foreach (var (type, factory, generated) in sources)
             {
                 EosSystem instance;
                 try
                 {
-                    instance = (EosSystem)Activator.CreateInstance(type);
+                    instance = factory();
                 }
                 catch (Exception ex)
                 {
@@ -117,12 +141,26 @@ namespace EOS.Systems
 
                 foreach (var method in eventMethods)
                 {
+                    var sig = SystemSignature.Of(method);
                     Action<float> body;
                     IEventChannel channel;
                     int slot;
                     try
                     {
-                        (body, channel, slot) = BuildEventQuery(instance, method);
+                        var eventBinder = generated?.GetEventBody(sig);
+                        if (eventBinder != null)
+                        {
+                            var binding = eventBinder(instance, World);
+                            body = binding.Body;
+                            channel = binding.Channel;
+                            slot = binding.Slot;
+                        }
+                        else
+                        {
+                            if (generated != null)
+                                EosLog.Warning($"{type.Name}.{method.Name}: no generated typed event body, falling back to reflection (unsupported shape or stale registry — regenerate)", nameof(SystemsRunner));
+                            (body, channel, slot) = BuildEventQuery(instance, method, generated?.GetInvoker(sig));
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -141,11 +179,26 @@ namespace EOS.Systems
 
                 foreach (var method in methods)
                 {
+                    var sig = SystemSignature.Of(method);
                     Action<float, ulong> body;
                     bool reactive;
                     try
                     {
-                        (body, reactive) = BuildQuery(instance, method);
+                        var binder = generated?.GetBody(sig);
+                        if (binder != null && SystemShape.CanTypeBody(method))
+                        {
+                            var include = ResolveIndexedStorages(CollectIncludeTypes(method));
+                            var exclude = ResolveIndexedStorages(CollectExcludeTypes(method));
+                            var tagMatch = BuildTagMatch(method);
+                            body = binder(instance, World, include, exclude, tagMatch);
+                            reactive = SystemShape.IsReactive(method);
+                        }
+                        else
+                        {
+                            if (generated != null)
+                                EosLog.Warning($"{type.Name}.{method.Name}: no generated typed body, falling back to reflection (unsupported shape or stale registry — regenerate)", nameof(SystemsRunner));
+                            (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(sig));
+                        }
                     }
                     catch (Exception ex)
                     {
