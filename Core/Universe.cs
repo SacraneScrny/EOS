@@ -103,6 +103,14 @@ namespace EOS.Core
                     world.LateUpdate(deltaTime);
         }
 
+        public static void DebugDraw()
+        {
+            if (!IsEnabled) return;
+            _defaultWorld.DebugDraw();
+            foreach (var world in _otherWorlds)
+                world.DebugDraw();
+        }
+
         public static void On() => IsEnabled = true;
         public static void Off() => IsEnabled = false;
     }

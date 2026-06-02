@@ -3,6 +3,7 @@ using System;
 using EOS.Entities;
 using EOS.Logging;
 using EOS.Objects;
+using EOS.Profiling;
 using EOS.Storage;
 using EOS.Systems;
 using EOS.Systems.CommandBuffer;
@@ -179,48 +180,77 @@ namespace EOS.Core
             if (IsDisposed) return;
             if (!IsEnabled) return;
             NextFrame();
-            _beforeAll.Execute();
-            _beforeUpdate.Execute();
-            InitializeSystems.Run();
-            BeginIteration();
-            try
+            using (EosProfiler.Sample("World.Update"))
             {
-                Systems.Update(deltaTime);
-                Objects.Update(deltaTime);
+                _beforeAll.Execute();
+                _beforeUpdate.Execute();
+                using (EosProfiler.Sample("InitializeSystems"))
+                    InitializeSystems.Run();
+                BeginIteration();
+                try
+                {
+                    using (EosProfiler.Sample("Systems.Update"))
+                        Systems.Update(deltaTime);
+                    using (EosProfiler.Sample("Objects.Update"))
+                        Objects.Update(deltaTime);
+                }
+                finally { EndIteration(); }
+                _afterUpdate.Execute();
             }
-            finally { EndIteration(); }
-            _afterUpdate.Execute();
         }
         public void FixedUpdate(float deltaTime)
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
             NextFrame();
-            _beforeFixedUpdate.Execute();
-            BeginIteration();
-            try
+            using (EosProfiler.Sample("World.FixedUpdate"))
             {
-                Systems.FixedUpdate(deltaTime);
-                Objects.FixedUpdate(deltaTime);
+                _beforeFixedUpdate.Execute();
+                BeginIteration();
+                try
+                {
+                    using (EosProfiler.Sample("Systems.FixedUpdate"))
+                        Systems.FixedUpdate(deltaTime);
+                    using (EosProfiler.Sample("Objects.FixedUpdate"))
+                        Objects.FixedUpdate(deltaTime);
+                }
+                finally { EndIteration(); }
+                _afterFixedUpdate.Execute();
             }
-            finally { EndIteration(); }
-            _afterFixedUpdate.Execute();
         }
         public void LateUpdate(float deltaTime)
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
             NextFrame();
-            _beforeLateUpdate.Execute();
+            using (EosProfiler.Sample("World.LateUpdate"))
+            {
+                _beforeLateUpdate.Execute();
+                BeginIteration();
+                try
+                {
+                    using (EosProfiler.Sample("Systems.LateUpdate"))
+                        Systems.LateUpdate(deltaTime);
+                    using (EosProfiler.Sample("Objects.LateUpdate"))
+                        Objects.LateUpdate(deltaTime);
+                }
+                finally { EndIteration(); }
+                _afterLateUpdate.Execute();
+                _afterAll.Execute();
+            }
+        }
+
+        public void DebugDraw()
+        {
+            if (IsDisposed) return;
+            if (!IsEnabled) return;
             BeginIteration();
             try
             {
-                Systems.LateUpdate(deltaTime);
-                Objects.LateUpdate(deltaTime);
+                Objects.DebugDraw();
+                Systems.DebugDraw();
             }
             finally { EndIteration(); }
-            _afterLateUpdate.Execute();
-            _afterAll.Execute();
         }
 
         public void Dispose()

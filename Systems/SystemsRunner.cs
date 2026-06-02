@@ -6,6 +6,7 @@ using System.Reflection;
 using EOS.Attributes;
 using EOS.Core;
 using EOS.Logging;
+using EOS.Profiling;
 using EOS.Systems.Groups;
 
 namespace EOS.Systems
@@ -17,14 +18,16 @@ namespace EOS.Systems
             public readonly Action<float, ulong> Body;
             public readonly Func<bool> IsUpdate;
             public readonly Type Type;
+            public readonly string Label;
             public readonly bool Reactive;
             public ulong Cursor;
 
-            public SystemEntry(Action<float, ulong> body, Func<bool> isUpdate, Type type, bool reactive, ulong cursor)
+            public SystemEntry(Action<float, ulong> body, Func<bool> isUpdate, Type type, string label, bool reactive, ulong cursor)
             {
                 Body = body;
                 IsUpdate = isUpdate;
                 Type = type;
+                Label = label;
                 Reactive = reactive;
                 Cursor = cursor;
             }
@@ -96,7 +99,7 @@ namespace EOS.Systems
                         EosLog.Error($"{type.Name}.{method.Name}: {ex.Message}", nameof(SystemsRunner));
                         continue;
                     }
-                    var entry = new SystemEntry(body, isUpdate, type, reactive, reactive ? World.Version : 0UL);
+                    var entry = new SystemEntry(body, isUpdate, type, type.Name, reactive, reactive ? World.Version : 0UL);
 
                     switch (instance.UpdateType)
                     {
@@ -133,18 +136,31 @@ namespace EOS.Systems
                     {
                         ulong now = World.Version;
                         if (entry.IsUpdate())
-                            entry.Body(deltaTime, entry.Cursor);
+                        {
+                            using (EosProfiler.Sample(entry.Label))
+                                entry.Body(deltaTime, entry.Cursor);
+                        }
                         entry.Cursor = now;
                     }
                     else if (entry.IsUpdate())
                     {
-                        entry.Body(deltaTime, 0UL);
+                        using (EosProfiler.Sample(entry.Label))
+                            entry.Body(deltaTime, 0UL);
                     }
                 }
                 catch (Exception ex)
                 {
                     EosLog.Error($"{entry.Type.Name}.Execute threw: {ex.InnerException?.Message ?? ex.Message}", nameof(SystemsRunner));
                 }
+            }
+        }
+
+        internal void DebugDraw()
+        {
+            for (int i = 0; i < _all.Count; i++)
+            {
+                try { _all[i].OnDebugDraw(); }
+                catch (Exception ex) { EosLog.Error($"{_all[i].GetType().Name}.OnDebugDraw threw: {ex.Message}", nameof(SystemsRunner)); }
             }
         }
 

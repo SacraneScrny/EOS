@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 
 using EOS.Core;
+using EOS.Logging;
 using EOS.Objects.Interfaces;
 
 namespace EOS.Objects
@@ -42,6 +44,15 @@ namespace EOS.Objects
             for (int i = _lateUpdates.Count - 1; i >= 0; i--)
                 if (_lateUpdates[i].IsEnabled)
                     _lateUpdates[i].OnLateUpdate(deltaTime);
+        }
+
+        internal void DebugDraw()
+        {
+            for (int i = _inited.Count - 1; i >= 0; i--)
+            {
+                try { _inited[i].DebugDraw(); }
+                catch (Exception ex) { EosLog.Error($"{_inited[i].GetType().Name}.OnDebugDraw threw: {ex.Message}", nameof(ObjectsContainer)); }
+            }
         }
 
         internal void RegisterObject(EosObject obj)

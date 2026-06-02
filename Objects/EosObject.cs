@@ -47,6 +47,13 @@ namespace EOS.Objects
         }
         protected virtual void OnStart() { }
 
+        internal void DebugDraw()
+        {
+            if (IsDisposed) return;
+            OnDebugDraw();
+        }
+        protected virtual void OnDebugDraw() { }
+
         List<IDisposable> _disposables;
         protected void Trace(IDisposable disposable)
         {
