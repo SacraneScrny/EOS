@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 using EOS.Logging;
+using EOS.Serialization;
 
 namespace EOS.Core
 {
@@ -22,7 +24,11 @@ namespace EOS.Core
             int IEqualityComparer<object>.GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
         }
 
-        interface ICell { }
+        interface ICell
+        {
+            bool Has { get; }
+            object BoxedValue { get; }
+        }
 
         sealed class Cell<T> : ICell where T : struct
         {
@@ -30,7 +36,13 @@ namespace EOS.Core
             public bool Has;
             public ulong Stamp;
             public readonly Dictionary<object, ulong> Cursors = new(RefComparer.Instance);
+
+            bool ICell.Has => Has;
+            object ICell.BoxedValue => Value;
         }
+
+        static readonly MethodInfo _setGenericBoxed = typeof(WorldContext)
+            .GetMethod(nameof(SetGenericBoxed), BindingFlags.Instance | BindingFlags.NonPublic);
 
         readonly Dictionary<Type, ICell> _cells = new();
         ulong _seq;
@@ -116,6 +128,32 @@ namespace EOS.Core
         }
 
         internal bool Changed<T>(object consumer) where T : struct => Changed<T>(consumer, out _);
+
+        internal void Capture(List<(Type type, object value)> into)
+        {
+            if (into == null) return;
+            foreach (var kv in _cells)
+            {
+                if (!kv.Value.Has) continue;
+                if (!typeof(ISerializableContext).IsAssignableFrom(kv.Key)) continue;
+                into.Add((kv.Key, kv.Value.BoxedValue));
+            }
+        }
+
+        void SetGenericBoxed<T>(object boxed) where T : struct => Set((T)boxed);
+
+        internal void RestoreValue(Type type, object value)
+        {
+            if (type == null || value == null) return;
+            try
+            {
+                _setGenericBoxed.MakeGenericMethod(type).Invoke(this, new[] { value });
+            }
+            catch (Exception ex)
+            {
+                EosLog.Error($"Failed to restore context value of type {type.Name}: {ex.Message}", nameof(WorldContext));
+            }
+        }
 
         internal void Reset()
         {
