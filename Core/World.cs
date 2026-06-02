@@ -1,6 +1,7 @@
 using System;
 
 using EOS.Entities;
+using EOS.Events;
 using EOS.Logging;
 using EOS.Objects;
 using EOS.Profiling;
@@ -105,6 +106,9 @@ namespace EOS.Core
         public ObjectsStorageMap ObjectsStorages { get; } = new();
         public SystemGroups SystemGroups { get; } = new();
         public InitializeSystemRunner InitializeSystems { get; } = new();
+        public EventsContainer Events { get; } = new();
+
+        public void Event<T>(in T e) where T : struct => Events.Enqueue(e);
 
         readonly WorldContext _context = new();
         public IWorldContext Context => _context;
@@ -154,6 +158,7 @@ namespace EOS.Core
             SystemGroups.Reset();
             Entities.Reset();
             Objects.Reset();
+            Events.Reset();
             _context.Reset();
         }
         public void Init()
@@ -174,6 +179,7 @@ namespace EOS.Core
             InitializeSystems.Init(this);
             Objects.Init(this);
             Entities.Init(this);
+            Events.Init(this);
             Systems.Init(this);
             _context.Init(this);
 
@@ -189,11 +195,15 @@ namespace EOS.Core
             {
                 _beforeAll.Execute();
                 _beforeUpdate.Execute();
+                Events.Promote();
+                Events.Trim();
                 using (EosProfiler.Sample("InitializeSystems"))
                     InitializeSystems.Run();
                 BeginIteration();
                 try
                 {
+                    using (EosProfiler.Sample("Systems.UpdateEvents"))
+                        Systems.UpdateEvents(deltaTime);
                     using (EosProfiler.Sample("Systems.Update"))
                         Systems.Update(deltaTime);
                     using (EosProfiler.Sample("Objects.Update"))
@@ -211,9 +221,13 @@ namespace EOS.Core
             using (EosProfiler.Sample("World.FixedUpdate"))
             {
                 _beforeFixedUpdate.Execute();
+                Events.Promote();
+                Events.Trim();
                 BeginIteration();
                 try
                 {
+                    using (EosProfiler.Sample("Systems.FixedUpdateEvents"))
+                        Systems.FixedUpdateEvents(deltaTime);
                     using (EosProfiler.Sample("Systems.FixedUpdate"))
                         Systems.FixedUpdate(deltaTime);
                     using (EosProfiler.Sample("Objects.FixedUpdate"))
@@ -231,9 +245,13 @@ namespace EOS.Core
             using (EosProfiler.Sample("World.LateUpdate"))
             {
                 _beforeLateUpdate.Execute();
+                Events.Promote();
+                Events.Trim();
                 BeginIteration();
                 try
                 {
+                    using (EosProfiler.Sample("Systems.LateUpdateEvents"))
+                        Systems.LateUpdateEvents(deltaTime);
                     using (EosProfiler.Sample("Systems.LateUpdate"))
                         Systems.LateUpdate(deltaTime);
                     using (EosProfiler.Sample("Objects.LateUpdate"))

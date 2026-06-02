@@ -93,13 +93,39 @@ Serialization of closed generics works without per-type registration or attribut
 
 ```
 ClearAllRecent → BeforeAll.Execute → BeforeUpdate.Execute
+→ Events.Promote + Events.Trim (stage → live, retire consumed/aged)
 → InitializeSystemRunner.Run   (Awake + Start pending objects)
+→ Systems.UpdateEvents         (EventExecute methods, inside BeginIteration guard)
 → Systems.Update               (Execute methods, inside BeginIteration guard)
 → Objects.Update               (IObjectUpdate components)
 → AfterUpdate.Execute
 ```
 
 `FixedUpdate` and `LateUpdate` follow the same shape without `InitializeSystems` and `BeforeAll/AfterAll`.
+
+### Events
+
+One-frame, read-once events modelled on the DOTS pattern (emit now, every interested system reads exactly once, then gone) — but without entities or `EosObject` overhead. Events are plain **structs** flowing through per-type `EventChannel<T>`, owned by `World.Events` (`EventsContainer`).
+
+Emit with `World.Event(in T e)` — the struct is copied into the channel's staging buffer. No closures, no entity, no structural change, so it is safe to call mid-iteration:
+
+```csharp
+World.Event(new DamageEvent { Target = e, Amount = 5 });
+```
+
+Read with an `EventExecute(T e)` method on an `EosSystem` (optionally `EventExecute(T e, float dt)`). A system may declare several `EventExecute` methods for different event types. `EventExecute` is just another kind of execute on the same system, not a new system: it runs **before** `Execute` in the same phase, and is sorted by the owning system type through the same `[Group]`, `[UpdateBefore]`, `[UpdateAfter]`, `[UpdateOrder]` graph (the topological sort is generic over entry type and is run independently over the event lists).
+
+```csharp
+class DamageSystem : EosSystem
+{
+    void EventExecute(DamageEvent e) { /* fires once per event */ }
+    void Execute(Health h) { /* normal query, runs after events */ }
+}
+```
+
+Lifecycle each phase: `Promote` moves staging → live with ascending sequence numbers (events surface one tick after emit); `Trim` drops live events. **Read-once is guaranteed by a per-`EventExecute` cursor** (a sequence watermark, exactly like `[New]`), so multi-tick `FixedUpdate` and phase ordering never cause double reads. Retirement is **min-cursor**: an event lives until every registered consumer of its type has advanced past it (i.e. everyone who wanted it read it), then it is dropped. `EventsContainer.MaxAge` (default 16 frames) is a hard safety cap so an undriven phase cannot leak. A consumer in a disabled group still advances its cursor (events are dropped for it), consistent with the reactive cursor caveat above.
+
+**Do not clear the `_channels` map in `Reset()`** — system closures hold direct channel references and consumer slots; `Reset()` only clears each channel's buffers and cursors.
 
 ### Logging
 
