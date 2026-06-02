@@ -113,7 +113,7 @@ Emit with `World.Event(in T e)` — the struct is copied into the channel's stag
 World.Event(new DamageEvent { Target = e, Amount = 5 });
 ```
 
-Read with an `EventExecute(T e)` method on an `EosSystem` (optionally `EventExecute(T e, float dt)`). A system may declare several `EventExecute` methods for different event types. `EventExecute` runs **before** `Execute` in the same phase, and respects the system's `UpdateType` and `[Group]` enable/disable like any other system method.
+Read with an `EventExecute(T e)` method on an `EosSystem` (optionally `EventExecute(T e, float dt)`). A system may declare several `EventExecute` methods for different event types. `EventExecute` is just another kind of execute on the same system, not a new system: it runs **before** `Execute` in the same phase, and is sorted by the owning system type through the same `[Group]`, `[UpdateBefore]`, `[UpdateAfter]`, `[UpdateOrder]` graph (the topological sort is generic over entry type and is run independently over the event lists).
 
 ```csharp
 class DamageSystem : EosSystem

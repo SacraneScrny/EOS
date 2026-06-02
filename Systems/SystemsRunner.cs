@@ -40,14 +40,16 @@ namespace EOS.Systems
             public readonly Func<bool> IsUpdate;
             public readonly IEventChannel Channel;
             public readonly int Slot;
+            public readonly Type Type;
             public readonly string Label;
 
-            public EventEntry(Action<float> body, Func<bool> isUpdate, IEventChannel channel, int slot, string label)
+            public EventEntry(Action<float> body, Func<bool> isUpdate, IEventChannel channel, int slot, Type type, string label)
             {
                 Body = body;
                 IsUpdate = isUpdate;
                 Channel = channel;
                 Slot = slot;
+                Type = type;
                 Label = label;
             }
         }
@@ -127,7 +129,7 @@ namespace EOS.Systems
                         EosLog.Error($"{type.Name}.{method.Name}: {ex.Message}", nameof(SystemsRunner));
                         continue;
                     }
-                    var eventEntry = new EventEntry(body, isUpdate, channel, slot, $"{type.Name}.{method.Name}");
+                    var eventEntry = new EventEntry(body, isUpdate, channel, slot, type, $"{type.Name}.{method.Name}");
 
                     switch (instance.UpdateType)
                     {
@@ -161,9 +163,13 @@ namespace EOS.Systems
                 }
             }
 
-            TopologicalSort(_update);
-            TopologicalSort(_fixedUpdate);
-            TopologicalSort(_lateUpdate);
+            TopologicalSort(_update, e => e.Type);
+            TopologicalSort(_fixedUpdate, e => e.Type);
+            TopologicalSort(_lateUpdate, e => e.Type);
+
+            TopologicalSort(_eventUpdate, e => e.Type);
+            TopologicalSort(_eventFixedUpdate, e => e.Type);
+            TopologicalSort(_eventLateUpdate, e => e.Type);
 
             foreach (var system in _all)
             {
