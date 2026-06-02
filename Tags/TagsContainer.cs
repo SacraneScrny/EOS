@@ -109,6 +109,25 @@ namespace EOS.Tags
             }
         }
 
+        internal void CollectDescriptors(EosEntity entity, List<TagRegistry.TagDescriptor> into)
+        {
+            if (into == null) return;
+            into.Clear();
+            int id = entity.Id;
+            if (id < 0 || id >= _entityCapacity) return;
+
+            int b = id * _words;
+            for (int w = 0; w < _words; w++)
+            {
+                ulong word = _bits[b + w];
+                if (word == 0) continue;
+                for (int bit = 0; bit < 64; bit++)
+                    if ((word & (1UL << bit)) != 0
+                        && _registry.TryDescribe((w << 6) + bit, out var descriptor))
+                        into.Add(descriptor);
+            }
+        }
+
         public ulong[] BuildMask(IEnumerable<object> tags)
         {
             if (tags == null) return null;

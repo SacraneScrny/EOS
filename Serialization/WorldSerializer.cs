@@ -7,6 +7,7 @@ using EOS.Logging;
 using EOS.Objects;
 using EOS.Serialization.Snapshot;
 using EOS.Storage;
+using EOS.Tags;
 
 namespace EOS.Serialization
 {
@@ -40,17 +41,38 @@ namespace EOS.Serialization
         {
             var ws = new WorldSnapshot { WorldKey = world.Key };
 
+            var descriptors = new List<TagRegistry.TagDescriptor>();
             foreach (var entity in world.Entities.All())
             {
                 if (!world.Entities.IsSerializable(entity)) continue;
-                ws.Entities.Add(new EntityRecord
+                var record = new EntityRecord
                 {
                     LocalId = entity.Id,
                     Name = entity.Name,
                     Active = entity.IsActive,
                     StableKey = world.Entities.GetStableKey(entity)
-                });
+                };
+
+                world.Tags.CollectDescriptors(entity, descriptors);
+                for (int i = 0; i < descriptors.Count; i++)
+                {
+                    var d = descriptors[i];
+                    record.Tags.Add(d.IsEnum
+                        ? new TagRecord { EnumType = d.EnumType.AssemblyQualifiedName, EnumValue = d.EnumValue }
+                        : new TagRecord { Name = d.String });
+                }
+
+                ws.Entities.Add(record);
             }
+
+            var contextValues = new List<(Type type, object value)>();
+            world.LocalContext.Capture(contextValues);
+            for (int i = 0; i < contextValues.Count; i++)
+                ws.Context.Add(new ContextRecord
+                {
+                    TypeName = contextValues[i].type.AssemblyQualifiedName,
+                    Value = contextValues[i].value
+                });
 
             foreach (var (type, storage) in world.ObjectsStorages.AllStorages)
             {
@@ -112,6 +134,7 @@ namespace EOS.Serialization
                 mapper[record.LocalId] = entity;
                 if (!string.IsNullOrEmpty(record.StableKey))
                     world.Entities.SetStableKey(entity, record.StableKey);
+                RestoreTags(world, entity, record.Tags);
             }
 
             var ctx = new RestoreContext(mapper, world);
@@ -159,6 +182,48 @@ namespace EOS.Serialization
                             EosLog.Error($"{componentType.Name}.DeserializeData threw: {ex.Message}", nameof(WorldSerializer));
                         }
                     }
+                }
+            }
+
+            foreach (var record in ws.Context)
+            {
+                var type = ResolveType(record.TypeName);
+                if (type == null)
+                {
+                    EosLog.Warning($"Context type '{record.TypeName}' not found, skipping", nameof(WorldSerializer));
+                    continue;
+                }
+                world.LocalContext.RestoreValue(type, record.Value);
+            }
+        }
+
+        static void RestoreTags(World world, EosEntity entity, List<TagRecord> tags)
+        {
+            if (tags == null) return;
+            for (int i = 0; i < tags.Count; i++)
+            {
+                var rec = tags[i];
+                try
+                {
+                    if (rec.EnumType == null)
+                    {
+                        if (!string.IsNullOrEmpty(rec.Name))
+                            world.Tags.Add(entity, rec.Name);
+                    }
+                    else
+                    {
+                        var enumType = ResolveType(rec.EnumType);
+                        if (enumType == null || !enumType.IsEnum)
+                        {
+                            EosLog.Warning($"Enum tag type '{rec.EnumType}' not found, skipping", nameof(WorldSerializer));
+                            continue;
+                        }
+                        world.Tags.Add(entity, Enum.ToObject(enumType, rec.EnumValue));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    EosLog.Error($"Failed to restore tag on entity {entity.Id}: {ex.Message}", nameof(WorldSerializer));
                 }
             }
         }
