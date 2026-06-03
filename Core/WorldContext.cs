@@ -11,6 +11,8 @@ namespace EOS.Core
     public interface IWorldContext
     {
         T Get<T>() where T : struct;
+        bool TryGet<T>(out T value) where T : struct;
+        bool Has<T>() where T : struct;
         void Set<T>(in T value) where T : struct;
         void Clear<T>() where T : struct;
     }
