@@ -6,12 +6,13 @@ namespace EOS.Entities
 {
     public readonly struct EosEntity : IEquatable<EosEntity>
     {
-        public static readonly EosEntity Null = new(-1, 0, null, string.Empty);
+        public static readonly EosEntity Null = new(-1, 0, null);
 
         public readonly int Id;
         public readonly ushort Version;
-        public readonly string Name;
         internal readonly World World;
+
+        public string Name => World != null ? World.Entities.GetName(Id) : string.Empty;
 
         public bool IsValid => World != null && World.Entities.IsValid(this);
         public bool IsActive => World != null && World.Entities.IsActive(this);
@@ -22,13 +23,14 @@ namespace EOS.Entities
                 name = "Entity";
             World = world;
 
-            (Id, Version, Name) = world.Entities.Create(name, active, isSerializable);
+            var created = world.Entities.Create(name, active, isSerializable);
+            Id = created.Id;
+            Version = created.Version;
         }
-        internal EosEntity(int id, ushort version, World world, string name = "")
+        internal EosEntity(int id, ushort version, World world)
         {
             Id = id;
             Version = version;
-            Name = name;
             World = world;
         }
 

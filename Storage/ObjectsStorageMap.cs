@@ -84,6 +84,20 @@ namespace EOS.Storage
             if (_map.TryGetValue(obj.GetType(), out var storage))
                 (storage as IIndexedStorage)?.Bump(obj.Entity);
         }
+        internal void RefreshReady(EosObject obj)
+        {
+            if (_map.TryGetValue(obj.GetType(), out var storage))
+                (storage as IIndexedStorage)?.RefreshReady(obj.Entity);
+        }
+        internal void RefreshReadyAll(EosEntity entity)
+        {
+            int id = entity.Id;
+            if (id < 0 || id >= _entityStorages.Length) return;
+            var list = _entityStorages[id];
+            if (list == null) return;
+            for (int i = 0; i < list.Count; i++)
+                (list[i] as IIndexedStorage)?.RefreshReady(entity);
+        }
 
         internal void DestroyEntity(EosEntity entity)
         {

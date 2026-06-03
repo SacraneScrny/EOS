@@ -24,7 +24,7 @@ namespace EOS.Entities
         internal EosEntity At(int index)
         {
             int id = _alive[index];
-            return new EosEntity(id, _versions[id], World, _names[id] ?? string.Empty);
+            return new EosEntity(id, _versions[id], World);
         }
         internal string GetName(int id)
         {
@@ -66,7 +66,7 @@ namespace EOS.Entities
         {
             if (!string.IsNullOrEmpty(key) && _keyToId.TryGetValue(key, out int id))
             {
-                entity = new EosEntity(id, _versions[id], World, _names[id] ?? string.Empty);
+                entity = new EosEntity(id, _versions[id], World);
                 return true;
             }
             entity = EosEntity.Null;
@@ -102,7 +102,9 @@ namespace EOS.Entities
         public void SetActive(EosEntity entity, bool active)
         {
             if (!IsValid(entity)) return;
+            if (_actives[entity.Id] == active) return;
             _actives[entity.Id] = active;
+            World.ObjectsStorages.RefreshReadyAll(entity);
         }
 
         public void Destroy(EosEntity entity)
