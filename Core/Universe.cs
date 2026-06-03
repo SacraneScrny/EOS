@@ -8,6 +8,8 @@ namespace EOS.Core
         static int _nextId = 0;
         public static bool IsEnabled { get; private set; }
 
+        static float _accumulator;
+
         static World _defaultWorld;
         public static IReadOnlyWorld DefaultWorld => _defaultWorld;
         internal static World InternalDefaultWorld => _defaultWorld;
@@ -28,6 +30,7 @@ namespace EOS.Core
             _defaultWorld = new();
             _defaultWorld.SetId(_nextId++);
             _defaultWorld.Init();
+            _accumulator = 0f;
             IsEnabled = true;
 
             var snapshot = WorldLoader.OnLoad?.Invoke();
@@ -81,6 +84,22 @@ namespace EOS.Core
             foreach (var world in _otherWorlds)
                 if (!world.IsManualUpdate)
                     world.Update(deltaTime);
+        }
+
+        public static void Tick(float realDelta, float fixedStep = 1f / 60f, int maxSteps = 8)
+        {
+            if (!IsEnabled) return;
+            if (fixedStep <= 0f) { Update(realDelta); return; }
+
+            _accumulator += realDelta;
+            int steps = 0;
+            while (_accumulator >= fixedStep && steps < maxSteps)
+            {
+                Update(fixedStep);
+                _accumulator -= fixedStep;
+                steps++;
+            }
+            if (steps >= maxSteps) _accumulator = 0f;
         }
         public static void FixedUpdate(float deltaTime)
         {
