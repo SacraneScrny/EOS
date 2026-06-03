@@ -11,6 +11,7 @@ namespace EOS.Storage
         bool IsReady(int index);
         void MarkReady(EosEntity entity);
         void Bump(EosEntity entity);
+        void RefreshReady(EosEntity entity);
         int IndexOf(EosEntity entity);
         bool HasReady(EosEntity entity);
         object TryGetReadyObject(EosEntity entity);

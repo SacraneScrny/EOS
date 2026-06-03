@@ -15,6 +15,7 @@ namespace EOS.Storage
         ulong[] _addVersion = new ulong[1024];
         ulong[] _markVersion = new ulong[1024];
         ulong[] _markFrame = new ulong[1024];
+        bool[] _ready = new bool[1024];
         int[] _sparse = new int[1024];
 
         public int Count { get; private set; }
@@ -51,6 +52,7 @@ namespace EOS.Storage
             _addVersion[i] = 0;
             _markVersion[i] = 0;
             _markFrame[i] = 0;
+            _ready[i] = false;
             _sparse[entity.Id] = i;
             _data[i] = new T();
             _data[i].SetupObject(entity);
@@ -103,7 +105,7 @@ namespace EOS.Storage
             return false;
         }
         public EosEntity GetOwner(int index) =>
-            new(_owners[index], _ownerVersions[index], World, World.Entities.GetName(_owners[index]));
+            new(_owners[index], _ownerVersions[index], World);
 
         public bool Remove(EosEntity entity)
         {
@@ -121,6 +123,7 @@ namespace EOS.Storage
                 _addVersion[i] = _addVersion[last];
                 _markVersion[i] = _markVersion[last];
                 _markFrame[i] = _markFrame[last];
+                _ready[i] = _ready[last];
                 _sparse[_owners[i]] = i;
             }
 
@@ -131,6 +134,7 @@ namespace EOS.Storage
             _addVersion[last] = 0;
             _markVersion[last] = 0;
             _markFrame[last] = 0;
+            _ready[last] = false;
 
             World.ObjectsStorages.UntrackEntity(entity, this);
             return true;
@@ -154,12 +158,20 @@ namespace EOS.Storage
             Array.Clear(_addVersion, 0, count);
             Array.Clear(_markVersion, 0, count);
             Array.Clear(_markFrame, 0, count);
+            Array.Clear(_ready, 0, count);
             Count = 0;
             MaxAddVersion = 0;
             MaxMarkVersion = 0;
         }
 
-        public bool IsReady(int index) => _data[index] != null && _data[index].IsEnabled;
+        public bool IsReady(int index) => _ready[index];
+
+        public void RefreshReady(EosEntity entity)
+        {
+            int i = IndexOf(entity);
+            if (i < 0) return;
+            _ready[i] = _data[i] != null && _data[i].IsEnabled;
+        }
 
         public void MarkReady(EosEntity entity)
         {
@@ -167,6 +179,7 @@ namespace EOS.Storage
             if (i < 0) return;
             _addVersion[i] = World.NextVersion();
             MaxAddVersion = _addVersion[i];
+            _ready[i] = _data[i] != null && _data[i].IsEnabled;
         }
 
         public void Bump(EosEntity entity)
@@ -191,6 +204,7 @@ namespace EOS.Storage
             Array.Resize(ref _addVersion, n);
             Array.Resize(ref _markVersion, n);
             Array.Resize(ref _markFrame, n);
+            Array.Resize(ref _ready, n);
         }
         void EnsureSparse(int id)
         {

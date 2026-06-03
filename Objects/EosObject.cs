@@ -16,7 +16,7 @@ namespace EOS.Objects
         public bool IsEnabled => IsAwaken && IsStarted && _enabled && Entity.IsActive;
         public bool IsDeserialized { get; internal set; }
 
-        protected bool _enabled = true;
+        bool _enabled = true;
         public EosEntity Entity { get; private set; } = EosEntity.Null;
 
         internal int UpdateIndex = -1;
@@ -95,5 +95,15 @@ namespace EOS.Objects
             if (HasEntity && Entity.IsValid)
                 Entity.World.ObjectsStorages.Bump(this);
         }
+
+        public void SetEnabled(bool value)
+        {
+            if (_enabled == value) return;
+            _enabled = value;
+            if (HasEntity && Entity.IsValid)
+                Entity.World.ObjectsStorages.RefreshReady(this);
+        }
+        public void Enable() => SetEnabled(true);
+        public void Disable() => SetEnabled(false);
     }
 }
