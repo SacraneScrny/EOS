@@ -603,4 +603,4 @@ For a deeper architectural walkthrough — storage internals, reactive watermark
 
 ## License
 
-No license file is currently included in this repository. Until one is added, all rights are reserved by the authors; contact the maintainers before using EOS outside this repository.
+EOS is released under the [MIT License](./LICENSE) — use it for anything, commercial or otherwise. The only condition is that the copyright notice and license text travel with substantial copies of the source.
