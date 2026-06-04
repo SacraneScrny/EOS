@@ -47,7 +47,6 @@ EOS borrows ideas from data-oriented designs (dense storage, deferred structural
   - [Static lifecycle](#static-lifecycle)
 - [Project layout](#project-layout)
 - [Design notes & constraints](#design-notes--constraints)
-- [License](#license)
 
 ---
 
@@ -598,9 +597,3 @@ Tags/            TagRegistry, TagsContainer bitmask, TagFilter
 - **Engine-agnostic core.** There are no `UnityEngine` (or any engine) references in the core. Rendering, input, and persistence live in a separate consumer assembly that plugs in through the `Incarnation`, service, and `WorldLoader` seams.
 
 For a deeper architectural walkthrough — storage internals, reactive watermarks, event retirement, the topological sort — see [`CLAUDE.md`](./CLAUDE.md).
-
----
-
-## License
-
-EOS is released under the [MIT License](./LICENSE) — use it for anything, commercial or otherwise. The only condition is that the copyright notice and license text travel with substantial copies of the source.
