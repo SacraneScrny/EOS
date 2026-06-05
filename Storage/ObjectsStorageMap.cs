@@ -16,15 +16,21 @@ namespace EOS.Storage
         public IReadOnlyDictionary<Type, IStorage> AllStorages => _map;
 
         public Storage<T> Get<T>() where T : EosObject, new()
+            => (Storage<T>)GetOrCreate(typeof(T));
+
+        public IStorage GetOrCreate(Type type)
         {
-            if (_map.TryGetValue(typeof(T), out var existing))
-                return (Storage<T>)existing;
+            if (type != null && _map.TryGetValue(type, out var existing))
+                return existing;
 
-            var created = new Storage<T>();
-            created.Init(World);
-            _map.Add(typeof(T), created);
+            if (type == null || type.IsAbstract || !typeof(EosObject).IsAssignableFrom(type))
+                throw new ArgumentException($"GetOrCreate requires a concrete EosObject type, got '{type}'");
 
-            foreach (var iface in typeof(T).GetInterfaces())
+            var created = (IStorage)Activator.CreateInstance(typeof(Storage<>).MakeGenericType(type));
+            ((WorldBound)created).Init(World);
+            _map.Add(type, created);
+
+            foreach (var iface in type.GetInterfaces())
             {
                 if (!_byInterface.TryGetValue(iface, out var list))
                 {
