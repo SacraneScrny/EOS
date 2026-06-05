@@ -7,6 +7,7 @@ using EOS.Extensions;
 
 namespace EOS.Objects
 {
+    [Serializable]
     public abstract class EosObject : IDisposable
     {
         public bool IsAwaken { get; private set; }
