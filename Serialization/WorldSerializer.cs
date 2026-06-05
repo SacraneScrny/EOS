@@ -13,9 +13,6 @@ namespace EOS.Serialization
 {
     public static class WorldSerializer
     {
-        static readonly MethodInfo _getMethod = typeof(ObjectsStorageMap)
-            .GetMethod(nameof(ObjectsStorageMap.Get), BindingFlags.Instance | BindingFlags.Public);
-
         public static void Save()
         {
             if (WorldLoader.OnSave == null) return;
@@ -151,7 +148,7 @@ namespace EOS.Serialization
                 IStorage storage;
                 try
                 {
-                    storage = (IStorage)_getMethod.MakeGenericMethod(componentType).Invoke(world.ObjectsStorages, null);
+                    storage = world.ObjectsStorages.GetOrCreate(componentType);
                 }
                 catch (Exception ex)
                 {
