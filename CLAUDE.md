@@ -121,6 +121,17 @@ Two interchangeable paths produce identical results:
 
 `SystemShape` / `SystemSignature` are the shared shape-and-identity model both paths agree on. **Open-generic systems are unsupported** by either path: discovery can't `Activator.CreateInstance` an open generic, and there is no explicit per-type registration hook. A system that needs a concrete `T` in its body must be a closed, named subclass (`class FooSystem : BarSystem<Baz>`).
 
+### Imperative queries (external access)
+
+`World.Query<...>()` (extension on `IReadOnlyWorld`, namespace `EOS.Queries`) is the imperative counterpart to system `Execute` queries, for code that runs **outside** the system loop — UI, MonoBehaviours, editor tools. It returns a `readonly struct EntityQuery<T>` / `EntityQuery<T1,T2>` / `EntityQuery<T1,T2,T3>` with an allocation-free struct enumerator:
+
+```csharp
+foreach (var health in world.Query<Health>()) { ... }
+foreach (var (pos, vel) in world.Query<Position, Velocity>()) { ... }
+```
+
+It visits only **ready, enabled** components (same `IsReady` gate as systems), pivots on the smallest storage for multi-component queries, and dedups by entity. Fluent filters mirror the system attributes: `.With<T>()` / `.Without<T>()` (has / not-has, both ready-gated), `.WithTag / .WithoutTag / .WithAnyTag / .WithOneTag(...)`. Each fluent call returns a new immutable query struct (copy-on-write filter arrays — small allocs at configuration time only; enumeration stays alloc-free). Terminal helpers: `Any()`, `Count()`, `First()` / `TryFirst(out)`, `ForEach(...)`, `ToList()`. Multi-component results are `QueryResult<...>` structs (`.Entity`, `.Item1…`, with `Deconstruct`). Reactive `[New]`/`[Bumped]` channels are system-only and intentionally not exposed here. Enumeration is read-only; structural changes during it are caught by `StructuralChangePolicy` just like systems.
+
 ### Generic components
 
 `EosObject` subclasses may be generic. A **closed** generic (`Incarnation<Transform>`) is an ordinary concrete component: `Storage<T>` keys by `typeof(T)`, so each closed type gets its own dense array and is still indexed under every interface it implements.

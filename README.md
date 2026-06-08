@@ -322,6 +322,32 @@ public class DirtyTransformSystem : EosSystem
 
 > **Caveat:** a reactive system's cursor advances **every frame, even while its group is disabled** — so edges that occur during a disabled period are dropped when the group re-enables. New reactive systems start their cursor at the current version, so they never fire for components that already existed.
 
+### Imperative queries (UI, MonoBehaviours, tools)
+
+Systems are the place for simulation logic, but view code that lives **outside** the tick — UI panels, MonoBehaviours, editor tooling — often needs to read world state on demand. `world.Query<...>()` is the imperative counterpart to a system's `Execute` query: an allocation-free struct enumerator over the same **ready, enabled** components.
+
+```csharp
+// One component — yields the component (entity via component.Entity):
+foreach (var health in world.Query<Health>())
+    bar.SetFill(health.Current / (float)health.Max);
+
+// Two or three — yields a QueryResult with .Entity + .Item1.. (deconstructable):
+foreach (var (pos, vel) in world.Query<Position, Velocity>())
+    DrawArrow(pos.Value, vel.Value);
+
+// Fluent filters mirror the system attributes:
+var enemies = world.Query<Health>()
+    .With<Brain>()         // must also have Brain
+    .Without<Stunned>()    // must NOT have Stunned
+    .WithTag("Enemy");     // WithTag / WithoutTag / WithAnyTag / WithOneTag
+
+int count = enemies.Count();
+if (enemies.TryFirst(out var first)) { /* ... */ }
+enemies.ForEach(h => h.Disable());
+```
+
+Multi-component queries pivot on the smallest storage and dedup by entity. `Query<...>` is an extension on `IReadOnlyWorld`, so it works on any `World` and on `Universe.DefaultWorld`. Enumeration is read-only — structural changes during it hit `StructuralChangePolicy` just like inside a system. Reactive `[New]`/`[Bumped]` channels stay system-only by design.
+
 ### Events
 
 One-frame, read-once events modelled on the data-oriented pattern: emit now, every interested system reads exactly once, then it is gone — no entities, no `EosObject` overhead. Events are plain **structs** flowing through per-type channels.
@@ -580,6 +606,7 @@ Loader/          IncarnationBridge, IIncarnationBinder, EosDomainReset
 Logging/          EosLog ring buffer + log records
 Objects/         EosObject base, Incarnation<TView>, per-object update interfaces
 Profiling/        EosProfiler facade + swappable backends
+Queries/         Imperative EntityQuery<...> for external (UI/MonoBehaviour) read access
 Serialization/   WorldSerializer, WorldLoader hooks, snapshot records, serializable interfaces
 Storage/         Storage<T> dense sparse-set + ObjectsStorageMap registry
 Systems/         EosSystem, SystemsRunner, groups, command buffers, initialize runner, incarnation sync
