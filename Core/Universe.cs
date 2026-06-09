@@ -75,6 +75,7 @@ namespace EOS.Core
             foreach (var w in _otherWorlds) w?.Dispose();
             _otherWorlds.Clear();
             _nextId = 0;
+            _accumulator = 0;
             IsEnabled = false;
             IsBooted = false;
             IsIterating = false;
@@ -178,7 +179,7 @@ namespace EOS.Core
                 _accumulator -= fixedStep;
                 steps++;
             }
-            if (steps >= maxSteps) _accumulator = 0f;
+            if (_accumulator >= fixedStep) _accumulator = 0f;
         }
         public static void FixedUpdate(float deltaTime)
         {
