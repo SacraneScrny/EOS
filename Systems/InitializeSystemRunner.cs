@@ -32,16 +32,30 @@ namespace EOS.Systems
                 }
                 if (!World.Entities.IsActive(obj.Entity)) continue;
 
-                try { obj.Awake(); }
-                catch (Exception ex) { EosLog.Error($"{obj.GetType().Name}.Awake threw: {ex.Message}", nameof(InitializeSystemRunner)); }
+                obj.Awake();
+                if (obj.IsFailed)
+                {
+                    EosLog.Warning($"{obj.GetType().Name} failed to awake, disposing", nameof(InitializeSystemRunner));
+                    obj.Dispose();
+                    _batch.RemoveAt(i);
+                    World.Objects.MarkFailed(obj);
+                }
             }
 
             for (int i = _batch.Count - 1; i >= 0; i--)
             {
                 var obj = _batch[i];
                 if (!obj.IsAwaken || obj.IsDisposed) continue;
-                try { obj.Start(); }
-                catch (Exception ex) { EosLog.Error($"{obj.GetType().Name}.Start threw: {ex.Message}", nameof(InitializeSystemRunner)); }
+                
+                obj.Start();
+                if (obj.IsFailed)
+                {
+                    EosLog.Warning($"{obj.GetType().Name} failed to start, disposing", nameof(InitializeSystemRunner));
+                    obj.Dispose();
+                    World.Objects.MarkFailed(obj);
+                    continue;
+                }
+                
                 World.ObjectsStorages.MarkReady(obj);
                 World.Objects.MarkInitialized(obj);
             }

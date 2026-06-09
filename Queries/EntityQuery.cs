@@ -46,31 +46,31 @@ namespace EOS.Queries
         public EntityQuery<T> WithOneTag(params object[] tags)
             => new(_world, _storage, _filter.One(_world.Tags, _world.Tags.BuildMask(tags)));
 
-        public Enumerator GetEnumerator() => new(_storage, _filter);
+        public Enumerator GetEnumerator() => new(_world, _storage, _filter);
 
         public bool Any()
         {
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             return e.MoveNext();
         }
 
         public int Count()
         {
             int n = 0;
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             while (e.MoveNext()) n++;
             return n;
         }
 
         public T First()
         {
-            var e = GetEnumerator();
-            return e.MoveNext() ? e.Current : null;
+            using var e = GetEnumerator();
+            return e.MoveNext() ? e.Current : default;
         }
 
         public bool TryFirst(out T result)
         {
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             if (e.MoveNext())
             {
                 result = e.Current;
@@ -83,43 +83,61 @@ namespace EOS.Queries
         public void ForEach(Action<T> action)
         {
             if (action == null) return;
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             while (e.MoveNext()) action(e.Current);
         }
 
         public List<T> ToList()
         {
             var list = new List<T>();
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             while (e.MoveNext()) list.Add(e.Current);
             return list;
         }
 
-        public struct Enumerator
+        public struct Enumerator : IDisposable
         {
+            readonly IReadOnlyWorld _world;
             readonly Storage<T> _storage;
             readonly QueryFilter _filter;
             readonly int _count;
             int _index;
+            
+            bool _isDisposed; 
 
-            internal Enumerator(Storage<T> storage, QueryFilter filter)
+            internal Enumerator(IReadOnlyWorld world, Storage<T> storage, QueryFilter filter)
             {
+                _isDisposed = false;
+                
+                _world = world;
                 _storage = storage;
                 _filter = filter;
                 _count = storage.Count;
                 _index = -1;
+                
+                _world.BeginIterationInternal();
             }
 
             public T Current => _storage.At(_index);
 
             public bool MoveNext()
             {
+                if (_isDisposed) throw new ObjectDisposedException(nameof(Enumerator));
                 while (++_index < _count)
                 {
                     if (!_storage.IsReady(_index)) continue;
                     if (_filter.Matches(_storage.GetOwner(_index))) return true;
                 }
                 return false;
+            }
+            
+            public void Dispose()
+            {
+                if (!_isDisposed)
+                {
+                    _isDisposed = true;
+                    _world.EndIterationInternal();
+                }
             }
         }
     }

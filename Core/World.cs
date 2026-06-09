@@ -44,6 +44,9 @@ namespace EOS.Core
         IReadOnlyEntityCommandBuffer BeforeLateUpdate { get; }
         IReadOnlyEntityCommandBuffer AfterLateUpdate { get; }
         IReadOnlyEntityCommandBuffer AfterAll { get; }
+
+        internal void BeginIterationInternal();
+        internal void EndIterationInternal();
     }
 
     public class World : IDisposable, IReadOnlyWorld, IEquatable<World>
@@ -75,6 +78,9 @@ namespace EOS.Core
 
         public StructuralChangePolicy StructuralChangePolicy { get; set; } = StructuralChangePolicy.Throw;
 
+        void IReadOnlyWorld.BeginIterationInternal() => BeginIteration();
+        void IReadOnlyWorld.EndIterationInternal() => EndIteration();
+        
         void BeginIteration() => _iterationDepth++;
         void EndIteration() { if (_iterationDepth > 0) _iterationDepth--; }
 
@@ -166,6 +172,9 @@ namespace EOS.Core
             Events.Reset();
             _context.Reset();
             WorldBootstrap.Apply(this);
+            
+            EosLog.Debug($"World {Id}  has been reset.", this.ToString());
+            IsEnabled = true;
         }
         public void Init()
         {

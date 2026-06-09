@@ -22,6 +22,7 @@ namespace EOS.Tags
         {
             int id = entity.Id;
             if (id < 0 || tags == null) return;
+            if (!entity.IsValid) return;
 
             _scratch.Clear();
             for (int i = 0; i < tags.Length; i++) ResolveInto(tags[i], _scratch);
@@ -40,6 +41,7 @@ namespace EOS.Tags
         {
             int id = entity.Id;
             if (id < 0 || id >= _entityCapacity || tags == null) return;
+            if (!entity.IsValid) return;
 
             _scratch.Clear();
             for (int i = 0; i < tags.Length; i++) ResolveInto(tags[i], _scratch);
@@ -54,6 +56,7 @@ namespace EOS.Tags
 
         public bool Has(EosEntity entity, object tag)
         {
+            if (!entity.IsValid) return false;
             _scratch.Clear();
             ResolveInto(tag, _scratch);
             var mask = MaskFromScratch();
@@ -88,6 +91,7 @@ namespace EOS.Tags
         {
             int id = entity.Id;
             if (id < 0 || id >= _entityCapacity) return;
+            if (!entity.IsValid) return;
             int b = id * _words;
             for (int w = 0; w < _words; w++) _bits[b + w] = 0;
         }
@@ -98,6 +102,7 @@ namespace EOS.Tags
             into.Clear();
             int id = entity.Id;
             if (id < 0 || id >= _entityCapacity) return;
+            if (!entity.IsValid) return;
 
             int b = id * _words;
             for (int w = 0; w < _words; w++)
@@ -139,6 +144,7 @@ namespace EOS.Tags
         public bool MatchAll(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return true;
+            if (!entity.IsValid) return false;
             int id = entity.Id;
             if (id < 0 || id >= _entityCapacity) return false;
             int b = id * _words;
@@ -150,6 +156,7 @@ namespace EOS.Tags
         public bool MatchNone(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return true;
+            if (!entity.IsValid) return false;
             int id = entity.Id;
             if (id < 0 || id >= _entityCapacity) return true;
             int b = id * _words;
@@ -161,6 +168,7 @@ namespace EOS.Tags
         public bool MatchAny(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return false;
+            if (!entity.IsValid) return false;
             int id = entity.Id;
             if (id < 0 || id >= _entityCapacity) return false;
             int b = id * _words;
@@ -172,6 +180,7 @@ namespace EOS.Tags
         public bool MatchOne(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return false;
+            if (!entity.IsValid) return false;
             int id = entity.Id;
             if (id < 0 || id >= _entityCapacity) return false;
             int b = id * _words;

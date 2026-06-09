@@ -38,8 +38,8 @@ namespace EOS.Systems.Groups
 
         internal void Reset()
         {
-            _enabled.Clear();
-            _parents.Clear();
+            foreach (var type in _enabled)
+                _enabled[type.Key] = true;
         }
     }
 }

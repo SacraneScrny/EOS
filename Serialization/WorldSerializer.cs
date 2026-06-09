@@ -123,6 +123,7 @@ namespace EOS.Serialization
 
         static void RestoreWorld(World world, WorldSnapshot ws)
         {
+            world.Reset();
             var mapper = new Dictionary<int, EosEntity>(ws.Entities.Count);
 
             foreach (var record in ws.Entities)

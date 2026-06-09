@@ -26,10 +26,10 @@ namespace EOS.Entities
             int id = _alive[index];
             return new EosEntity(id, _versions[id], World);
         }
-        internal string GetName(int id)
+        internal string GetName(EosEntity entity)
         {
-            if (id < 0 || id >= _names.Length) return string.Empty;
-            return _names[id] ?? string.Empty;
+            if (!IsValid(entity)) return string.Empty;
+            return _names[entity.Id] ?? string.Empty;
         }
 
         public AliveEntities All() => new(this);
@@ -59,7 +59,7 @@ namespace EOS.Entities
         public bool IsSerializable(EosEntity entity)
         {
             int id = entity.Id;
-            return id >= 0 && id < _serializable.Length && _exists[id] && _serializable[id];
+            return id >= 0 && id < _serializable.Length && _exists[id] && _serializable[id] && _versions[id] == entity.Version;
         }
 
         public bool TryFind(string key, out EosEntity entity)
@@ -97,7 +97,7 @@ namespace EOS.Entities
         public bool IsActive(EosEntity entity)
         {
             int id = entity.Id;
-            return id >= 0 && id < _exists.Length && _exists[id] && _actives[id];
+            return id >= 0 && id < _exists.Length && _exists[id] && _actives[id] && _versions[id] == entity.Version;
         }
         public void SetActive(EosEntity entity, bool active)
         {
@@ -110,7 +110,7 @@ namespace EOS.Entities
         public void Destroy(EosEntity entity)
         {
             if (!IsValid(entity)) return;
-            if (!World.GuardStructuralChange($"Destroy entity '{GetName(entity.Id)}'")) return;
+            if (!World.GuardStructuralChange($"Destroy entity '{GetName(entity)}'")) return;
             int id = entity.Id;
 
             if (_idToKey.TryGetValue(id, out var stableKey))
@@ -150,14 +150,20 @@ namespace EOS.Entities
 
         internal void Reset()
         {
+            for (int i = 0; i < _next; i++)
+            {
+                _versions[i]++;
+            }
+
             _next = 0;
             _free.Clear();
-            Array.Clear(_versions, 0, _versions.Length);
+    
+            Array.Clear(_exists, 0, _exists.Length);
             Array.Clear(_names, 0, _names.Length);
             Array.Clear(_actives, 0, _actives.Length);
-            Array.Clear(_exists, 0, _exists.Length);
             Array.Clear(_serializable, 0, _serializable.Length);
             Array.Clear(_aliveIndex, 0, _aliveIndex.Length);
+    
             _alive.Clear();
             _keyToId.Clear();
             _idToKey.Clear();

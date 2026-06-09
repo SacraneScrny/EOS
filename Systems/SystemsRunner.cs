@@ -94,8 +94,25 @@ namespace EOS.Systems
             else
             {
                 var types = AppDomain.CurrentDomain.GetAssemblies()
-                    .SelectMany(a => a.GetTypes())
-                    .Where(t => t.IsSubclassOf(typeof(EosSystem)) && !t.IsAbstract);
+                    .SelectMany(assembly =>
+                    {
+                        try
+                        {
+                            return assembly.GetTypes();
+                        }
+                        catch (ReflectionTypeLoadException ex)
+                        {
+                            EosLog.Error($"Assembly {assembly.GetName().Name} has invalid types, skipping partially loaded", nameof(SystemsRunner));
+                            return ex.Types.Where(t => t != null);
+                        }
+                        catch (Exception ex)
+                        {
+                            EosLog.Error($"Assembly {assembly.GetName().Name} failed to load types: {ex.Message}", nameof(SystemsRunner));
+                            return Enumerable.Empty<Type>();
+                        }
+                    })
+                    .Where(t => t != null && t.IsSubclassOf(typeof(EosSystem)) && !t.IsAbstract)
+                    .ToList();
 
                 foreach (var type in types)
                 {
