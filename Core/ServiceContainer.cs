@@ -37,8 +37,6 @@ namespace EOS.Core
                 EosLog.Error($"Attempted to register a null service of type {typeof(T).Name}.", nameof(ServiceContainer));
                 return;
             }
-            if (_services.ContainsKey(typeof(T)))
-                EosLog.Warning($"Service of type {typeof(T).Name} is already registered and will be replaced.", nameof(ServiceContainer));
             _services[typeof(T)] = service;
         }
 
