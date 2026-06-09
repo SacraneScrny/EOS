@@ -2,6 +2,7 @@ using System;
 
 using EOS.Entities;
 using EOS.Events;
+using EOS.Loader;
 using EOS.Logging;
 using EOS.Objects;
 using EOS.Profiling;
@@ -164,6 +165,7 @@ namespace EOS.Core
             Objects.Reset();
             Events.Reset();
             _context.Reset();
+            WorldBootstrap.Apply(this);
         }
         public void Init()
         {
@@ -187,6 +189,7 @@ namespace EOS.Core
             Systems.Init(this);
             _context.Init(this);
             _services.Init(this);
+            WorldBootstrap.Apply(this);
 
             IsEnabled = true;
         }

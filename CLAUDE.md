@@ -185,7 +185,9 @@ The fluent API (`CommandChain` / `BoundSchedule`) chains conditionals and ops: `
 
 `World.Context` (`IWorldContext`) is a typed blackboard of **struct** values: `Get` / `TryGet` / `Has` / `Set` / `Clear`. Inside a system, `Context` returns a `LocalSystemContext` that adds `Changed<T>(out value)` — a per-system change watermark for "did this value change since I last looked." Only values implementing `ISerializableContext` are captured into snapshots.
 
-`World.Services` (`IServiceLocator`: `Get` / `TryGet` / `Has`) and `World.ServiceRegistry` (`IServiceRegistry`: `Register` / `Unregister`) form a per-world service locator. Registration is rejected during iteration — wire services before driving the world.
+`World.Services` (`IServiceLocator`: `Get` / `TryGet` / `Has`) and `World.ServiceRegistry` (`IServiceRegistry`: `Register` / `Unregister`) form a per-world service locator. Registration is rejected during iteration — wire services before driving the world. `ServiceContainer.Register` silently overwrites an existing service of the same type.
+
+`WorldBootstrap.Provider` (an `Action<World>` in `EOS.Loader`) is the per-world seeding seam: `World.Init()` and `World.Reset()` funnel every world through `WorldBootstrap.Apply(this)`, which invokes the provider if one is set (null = no-op, so it is safe with no consumer). It runs for the default world, worlds created via `Universe.CreateWorld`, and any created later, and re-runs on `Reset()` so context defaults survive the reset wipe (services survive `Reset` anyway; the silent-overwrite keeps re-seeding quiet). The core never populates it — the consumer does. The Unity bridge generates a `Register(World)` body from `[EosWorldBootstrap]` methods and installs it into `Provider` via `RuntimeInitializeOnLoadMethod(SubsystemRegistration)` (before any world boots); with no generated file the provider stays null. Unlike the other static seams it is not cleared by `EosDomainReset` — it points at a stateless dispatch method and is re-installed every play.
 
 ### Incarnation (the view seam)
 
