@@ -66,5 +66,9 @@ namespace EOS.Systems
             if (!World.ObjectsStorages.RemoveFromStorage(obj))
                 obj.Dispose();
         }
+        internal void Dispose()
+        {
+            _batch.Clear();
+        }
     }
 }

@@ -294,17 +294,16 @@ namespace EOS.Systems
             for (int i = 0; i < systems.Count; i++)
             {
                 var entry = systems[i];
+                ulong now = World.Version;
                 try
                 {
                     if (entry.Reactive)
                     {
-                        ulong now = World.Version;
                         if (entry.IsUpdate())
                         {
                             using (EosProfiler.Sample(entry.Label))
                                 entry.Body(deltaTime, entry.Cursor);
                         }
-                        entry.Cursor = now;
                     }
                     else if (entry.IsUpdate())
                     {
@@ -315,6 +314,10 @@ namespace EOS.Systems
                 catch (Exception ex)
                 {
                     EosLog.Error($"{entry.Type.Name}.Execute threw: {ex.InnerException?.Message ?? ex.Message}", nameof(SystemsRunner));
+                }
+                finally
+                {
+                    entry.Cursor = now;
                 }
             }
         }
@@ -330,5 +333,17 @@ namespace EOS.Systems
 
         public T GetSystem<T>() where T : EosSystem => _typeToSystem.TryGetValue(typeof(T), out var system) ? (T)system : null;
         public IEnumerable<EosSystem> All => _all;
+        
+        internal void Dispose()
+        {
+            _all.Clear();
+            _update.Clear();
+            _fixedUpdate.Clear();
+            _lateUpdate.Clear();
+            _eventUpdate.Clear();
+            _eventFixedUpdate.Clear();
+            _eventLateUpdate.Clear();
+            _typeToSystem.Clear();
+        }
     }
 }

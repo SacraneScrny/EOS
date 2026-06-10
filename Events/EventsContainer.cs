@@ -10,7 +10,7 @@ namespace EOS.Events
     {
         readonly Dictionary<Type, IEventChannel> _channels = new();
 
-        public ulong MaxAge { get; set; } = 16;
+        public const ulong MaxAge = 16;
 
         EventChannel<T> Get<T>() where T : struct
         {

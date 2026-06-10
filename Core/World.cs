@@ -308,7 +308,21 @@ namespace EOS.Core
         public void Dispose()
         {
             if (IsDisposed) return;
+            
             IsDisposed = true;
+            _beforeAll.Clear();
+            _beforeUpdate.Clear();
+            _afterUpdate.Clear();
+            _beforeFixedUpdate.Clear();
+            _afterFixedUpdate.Clear();
+            _beforeLateUpdate.Clear();
+            _afterLateUpdate.Clear();
+            _afterAll.Clear();
+            
+            Events.Reset();
+            Systems.Dispose();
+            InitializeSystems.Dispose();
+            
             ObjectsStorages.Reset();
             Tags.Reset();
             Entities.Reset();

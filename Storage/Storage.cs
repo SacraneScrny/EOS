@@ -9,14 +9,16 @@ namespace EOS.Storage
     public class Storage<T> : WorldBound, IStorage, IIndexedStorage
         where T : EosObject, new()
     {
-        T[] _data = new T[1024];
-        int[] _owners = new int[1024];
-        ushort[] _ownerVersions = new ushort[1024];
-        ulong[] _addVersion = new ulong[1024];
-        ulong[] _markVersion = new ulong[1024];
-        ulong[] _markFrame = new ulong[1024];
-        bool[] _ready = new bool[1024];
-        int[] _sparse = new int[1024];
+        const int InitialCapacity = 16;
+        
+        T[] _data = new T[InitialCapacity];
+        int[] _owners = new int[InitialCapacity];
+        ushort[] _ownerVersions = new ushort[InitialCapacity];
+        ulong[] _addVersion = new ulong[InitialCapacity];
+        ulong[] _markVersion = new ulong[InitialCapacity];
+        ulong[] _markFrame = new ulong[InitialCapacity];
+        bool[] _ready = new bool[InitialCapacity];
+        int[] _sparse = new int[InitialCapacity];
 
         public int Count { get; private set; }
         public ReadOnlySpan<T> All => _data.AsSpan(0, Count);
