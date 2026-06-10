@@ -36,14 +36,14 @@ namespace EOS.Core
         SystemGroups SystemGroups { get; }
         InitializeSystemRunner InitializeSystems { get; }
 
-        IReadOnlyEntityCommandBuffer BeforeAll { get; }
-        IReadOnlyEntityCommandBuffer BeforeUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterUpdate { get; }
-        IReadOnlyEntityCommandBuffer BeforeFixedUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterFixedUpdate { get; }
-        IReadOnlyEntityCommandBuffer BeforeLateUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterLateUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterAll { get; }
+        IEntityCommandScheduler BeforeAll { get; }
+        IEntityCommandScheduler BeforeUpdate { get; }
+        IEntityCommandScheduler AfterUpdate { get; }
+        IEntityCommandScheduler BeforeFixedUpdate { get; }
+        IEntityCommandScheduler AfterFixedUpdate { get; }
+        IEntityCommandScheduler BeforeLateUpdate { get; }
+        IEntityCommandScheduler AfterLateUpdate { get; }
+        IEntityCommandScheduler AfterAll { get; }
 
         internal void BeginIterationInternal();
         internal void EndIterationInternal();
@@ -127,28 +127,37 @@ namespace EOS.Core
 
         #region ECB
         EntityCommandBuffer _beforeAll;
-        public IReadOnlyEntityCommandBuffer BeforeAll => _beforeAll;
+        public IEntityCommandScheduler BeforeAll => _beforeAll;
 
         EntityCommandBuffer _beforeUpdate;
-        public IReadOnlyEntityCommandBuffer BeforeUpdate => _beforeUpdate;
+        public IEntityCommandScheduler BeforeUpdate => _beforeUpdate;
 
         EntityCommandBuffer _afterUpdate;
-        public IReadOnlyEntityCommandBuffer AfterUpdate => _afterUpdate;
+        public IEntityCommandScheduler AfterUpdate => _afterUpdate;
 
         EntityCommandBuffer _beforeFixedUpdate;
-        public IReadOnlyEntityCommandBuffer BeforeFixedUpdate => _beforeFixedUpdate;
+        public IEntityCommandScheduler BeforeFixedUpdate => _beforeFixedUpdate;
 
         EntityCommandBuffer _afterFixedUpdate;
-        public IReadOnlyEntityCommandBuffer AfterFixedUpdate => _afterFixedUpdate;
+        public IEntityCommandScheduler AfterFixedUpdate => _afterFixedUpdate;
 
         EntityCommandBuffer _beforeLateUpdate;
-        public IReadOnlyEntityCommandBuffer BeforeLateUpdate => _beforeLateUpdate;
+        public IEntityCommandScheduler BeforeLateUpdate => _beforeLateUpdate;
 
         EntityCommandBuffer _afterLateUpdate;
-        public IReadOnlyEntityCommandBuffer AfterLateUpdate => _afterLateUpdate;
+        public IEntityCommandScheduler AfterLateUpdate => _afterLateUpdate;
 
         EntityCommandBuffer _afterAll;
-        public IReadOnlyEntityCommandBuffer AfterAll => _afterAll;
+        public IEntityCommandScheduler AfterAll => _afterAll;
+
+        public UpdateType CurrentPhase { get; private set; } = UpdateType.Update;
+
+        public IEntityCommandScheduler AfterCurrentPhase => CurrentPhase switch
+        {
+            UpdateType.FixedUpdate => _afterFixedUpdate,
+            UpdateType.LateUpdate => _afterLateUpdate,
+            _ => _afterUpdate
+        };
         #endregion
 
         public void Reset()
@@ -207,6 +216,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            CurrentPhase = UpdateType.Update;
             NextFrame();
             using (EosProfiler.Sample("World.Update"))
             {
@@ -234,6 +244,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            CurrentPhase = UpdateType.FixedUpdate;
             NextFrame();
             using (EosProfiler.Sample("World.FixedUpdate"))
             {
@@ -258,6 +269,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            CurrentPhase = UpdateType.LateUpdate;
             NextFrame();
             using (EosProfiler.Sample("World.LateUpdate"))
             {

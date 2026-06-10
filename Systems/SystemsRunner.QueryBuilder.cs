@@ -65,6 +65,15 @@ namespace EOS.Systems
             bool isReactive = concreteParams.Any(p => p.channel != Channel.None)
                               || interfaceParams.Any(p => p.channel != Channel.None);
 
+            if (!isReactive
+                && (concreteParams.Count > 0 || interfaceParams.Count > 0)
+                && concreteParams.All(p => p.optional)
+                && interfaceParams.All(p => p.optional))
+            {
+                EosLog.Error($"{instance.GetType().Name}.{method.Name}: query with only [Optional] parameters never matches, make at least one parameter mandatory", nameof(SystemsRunner));
+                throw new Exception($"query with only [Optional] parameters never matches in {method.Name}");
+            }
+
             var excludeTypes = new List<Type>();
             foreach (var attr in method.GetCustomAttributes<ExcludeAttribute>(true))
                 excludeTypes.AddRange(attr.Types);
@@ -272,7 +281,7 @@ namespace EOS.Systems
                         Invoke(invoker, instance, method, BuildArgs(parameters, entity, deltaTime,
                             deltaTimeParamIndex, entityParamIndex,
                             concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, pivot, i,
-                            interfaceParams, combos[c]));
+                            interfaceParams, combos[c], 0UL));
                 }
             };
         }
@@ -323,7 +332,7 @@ namespace EOS.Systems
                             Invoke(invoker, instance, method, BuildArgs(parameters, entity, deltaTime,
                                 deltaTimeParamIndex, entityParamIndex,
                                 concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, driverConcrete, i,
-                                interfaceParams, combos[c]));
+                                interfaceParams, combos[c], cursor));
                     }
                 };
             }
@@ -376,7 +385,7 @@ namespace EOS.Systems
                                 Invoke(invoker, instance, method, BuildArgs(parameters, entity, deltaTime,
                                     deltaTimeParamIndex, entityParamIndex,
                                     concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, -1, -1,
-                                    interfaceParams, combos[c]));
+                                    interfaceParams, combos[c], cursor));
                         }
                     }
                 };
@@ -407,6 +416,8 @@ namespace EOS.Systems
 
                 foreach (var entity in World.Entities.All())
                 {
+                    if (!entity.IsActive) continue;
+
                     if (!CheckIncludeExclude(entity,
                         includeStorages, includeHasMethods,
                         excludeStorages, excludeHasMethods)) continue;
@@ -508,7 +519,10 @@ namespace EOS.Systems
                         return false;
                     }
                     if (ChannelVersionAt(concreteIndexed[j], idx, channel) <= cursor)
+                    {
+                        if (optional) continue;
                         return false;
+                    }
                 }
                 else if (!optional)
                 {
@@ -686,7 +700,7 @@ namespace EOS.Systems
             object[] concreteStorages, MethodInfo[] concreteGetMethods,
             IIndexedStorage[] concreteIndexed, int pivot, int pivotIndex,
             List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
-            object[] ifaceComponents)
+            object[] ifaceComponents, ulong cursor)
         {
             var args = new object[parameters.Length];
             if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
@@ -697,7 +711,7 @@ namespace EOS.Systems
                 if (j == pivot && pivotIndex >= 0)
                     args[concreteParams[j].position] = concreteIndexed[pivot].GetAt(pivotIndex);
                 else if (concreteParams[j].optional)
-                    args[concreteParams[j].position] = concreteIndexed[j].TryGetReadyObject(entity);
+                    args[concreteParams[j].position] = ResolveOptional(concreteIndexed[j], entity, concreteParams[j].channel, cursor);
                 else
                     args[concreteParams[j].position] = concreteGetMethods[j].Invoke(concreteStorages[j], new object[] { entity });
             }
@@ -706,6 +720,14 @@ namespace EOS.Systems
                 args[interfaceParams[j].position] = ifaceComponents[j];
 
             return args;
+        }
+
+        static object ResolveOptional(IIndexedStorage storage, EosEntity entity, Channel channel, ulong cursor)
+        {
+            int idx = storage.IndexOf(entity);
+            if (idx < 0 || !storage.IsReady(idx)) return null;
+            if (channel != Channel.None && ChannelVersionAt(storage, idx, channel) <= cursor) return null;
+            return storage.GetAt(idx);
         }
 
 

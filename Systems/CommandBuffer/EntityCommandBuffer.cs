@@ -7,7 +7,7 @@ using EOS.Logging;
 
 namespace EOS.Systems.CommandBuffer
 {
-    public interface IReadOnlyEntityCommandBuffer
+    public interface IEntityCommandScheduler
     {
         public DeferredEntity Create(string name = "", bool isSerializable = true);
         public BoundSchedule Schedule(EosEntity entity);
@@ -15,7 +15,7 @@ namespace EOS.Systems.CommandBuffer
         public void Schedule(EosEntity entity, CommandChain chain);
         public void Schedule(DeferredEntity deferred, CommandChain chain);
     }
-    public class EntityCommandBuffer : IReadOnlyEntityCommandBuffer
+    public class EntityCommandBuffer : IEntityCommandScheduler
     {
         readonly World _world;
         public EntityCommandBuffer(World world) => _world = world;
@@ -44,9 +44,9 @@ namespace EOS.Systems.CommandBuffer
             return new BoundSchedule(chain, this);
         }
         public void Schedule(EosEntity entity, CommandChain chain)
-            => _batches.Add((entity, chain.Ops));
+            => _batches.Add((entity, new List<Func<EosEntity, bool>>(chain.Ops)));
         public void Schedule(DeferredEntity deferred, CommandChain chain)
-            => _deferredBatches.Add((deferred, chain.Ops));
+            => _deferredBatches.Add((deferred, new List<Func<EosEntity, bool>>(chain.Ops)));
 
         public void Execute()
         {

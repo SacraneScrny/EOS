@@ -25,7 +25,7 @@ namespace EOS.Systems
                 if (!World.Entities.IsValid(obj.Entity))
                 {
                     EosLog.Warning($"{obj.GetType().Name} has invalid entity, disposing", nameof(InitializeSystemRunner));
-                    obj.Dispose();
+                    Discard(obj);
                     _batch.RemoveAt(i);
                     World.Objects.MarkFailed(obj);
                     continue;
@@ -36,7 +36,7 @@ namespace EOS.Systems
                 if (obj.IsFailed)
                 {
                     EosLog.Warning($"{obj.GetType().Name} failed to awake, disposing", nameof(InitializeSystemRunner));
-                    obj.Dispose();
+                    Discard(obj);
                     _batch.RemoveAt(i);
                     World.Objects.MarkFailed(obj);
                 }
@@ -46,19 +46,25 @@ namespace EOS.Systems
             {
                 var obj = _batch[i];
                 if (!obj.IsAwaken || obj.IsDisposed) continue;
-                
+
                 obj.Start();
                 if (obj.IsFailed)
                 {
                     EosLog.Warning($"{obj.GetType().Name} failed to start, disposing", nameof(InitializeSystemRunner));
-                    obj.Dispose();
+                    Discard(obj);
                     World.Objects.MarkFailed(obj);
                     continue;
                 }
-                
+
                 World.ObjectsStorages.MarkReady(obj);
                 World.Objects.MarkInitialized(obj);
             }
+        }
+
+        void Discard(EosObject obj)
+        {
+            if (!World.ObjectsStorages.RemoveFromStorage(obj))
+                obj.Dispose();
         }
     }
 }
