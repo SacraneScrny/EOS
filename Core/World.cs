@@ -310,26 +310,26 @@ namespace EOS.Core
             if (IsDisposed) return;
             
             IsDisposed = true;
-            _beforeAll.Clear();
-            _beforeUpdate.Clear();
-            _afterUpdate.Clear();
-            _beforeFixedUpdate.Clear();
-            _afterFixedUpdate.Clear();
-            _beforeLateUpdate.Clear();
-            _afterLateUpdate.Clear();
-            _afterAll.Clear();
+            _beforeAll?.Clear();
+            _beforeUpdate?.Clear();
+            _afterUpdate?.Clear();
+            _beforeFixedUpdate?.Clear();
+            _afterFixedUpdate?.Clear();
+            _beforeLateUpdate?.Clear();
+            _afterLateUpdate?.Clear();
+            _afterAll?.Clear();
             
-            Events.Reset();
-            Systems.Dispose();
-            InitializeSystems.Dispose();
+            Events?.Reset();
+            Systems?.Dispose();
+            InitializeSystems?.Dispose();
             
-            ObjectsStorages.Reset();
-            Tags.Reset();
-            Entities.Reset();
-            Objects.Reset();
-            SystemGroups.Reset();
-            _context.Reset();
-            _services.Clear();
+            ObjectsStorages?.Reset();
+            Tags?.Reset();
+            Entities?.Reset();
+            Objects?.Reset();
+            SystemGroups?.Reset();
+            _context?.Reset();
+            _services?.Clear();
         }
 
         public bool Equals(World other)
