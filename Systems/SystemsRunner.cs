@@ -202,7 +202,21 @@ namespace EOS.Systems
                     try
                     {
                         var binder = generated?.GetBody(sig);
-                        if (binder != null && SystemShape.CanTypeBody(method))
+                        bool stale = false;
+                        if (binder != null)
+                        {
+                            var expected = generated.GetShapeHash(sig);
+                            if (expected == null)
+                            {
+                                EosLog.Warning($"{type.Name}.{method.Name}: registry has no shape hash, regenerate to enable staleness detection", nameof(SystemsRunner));
+                            }
+                            else if (expected != SystemShape.ShapeHash(method))
+                            {
+                                EosLog.Error($"{type.Name}.{method.Name}: generated registry is stale (system shape changed since generation), falling back to reflection — regenerate", nameof(SystemsRunner));
+                                stale = true;
+                            }
+                        }
+                        if (binder != null && !stale && SystemShape.CanTypeBody(method))
                         {
                             var include = ResolveIndexedStorages(CollectIncludeTypes(method));
                             var exclude = ResolveIndexedStorages(CollectExcludeTypes(method));
@@ -212,7 +226,7 @@ namespace EOS.Systems
                         }
                         else
                         {
-                            if (generated != null)
+                            if (generated != null && !stale)
                                 EosLog.Warning($"{type.Name}.{method.Name}: no generated typed body, falling back to reflection (unsupported shape or stale registry — regenerate)", nameof(SystemsRunner));
                             (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(sig));
                         }

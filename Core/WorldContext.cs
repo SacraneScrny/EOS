@@ -30,6 +30,7 @@ namespace EOS.Core
         {
             bool Has { get; }
             object BoxedValue { get; }
+            void ClearCursors();
         }
 
         sealed class Cell<T> : ICell where T : struct
@@ -41,6 +42,7 @@ namespace EOS.Core
 
             bool ICell.Has => Has;
             object ICell.BoxedValue => Value;
+            void ICell.ClearCursors() => Cursors.Clear();
         }
 
         static readonly MethodInfo _setGenericBoxed = typeof(WorldContext)
@@ -48,6 +50,12 @@ namespace EOS.Core
 
         readonly Dictionary<Type, ICell> _cells = new();
         ulong _seq;
+
+        protected override void OnInited()
+        {
+            foreach (var cell in _cells.Values)
+                cell.ClearCursors();
+        }
 
         Cell<T> CellOf<T>(bool create) where T : struct
         {

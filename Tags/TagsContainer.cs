@@ -18,6 +18,17 @@ namespace EOS.Tags
 
         public TagRegistry Registry => _registry;
 
+        public void Add(EosEntity entity, object tag)
+        {
+            int id = entity.Id;
+            if (id < 0 || tag == null) return;
+            if (!entity.IsValid) return;
+
+            _scratch.Clear();
+            ResolveInto(tag, _scratch);
+            AddScratchBits(id);
+        }
+
         public void Add(EosEntity entity, params object[] tags)
         {
             int id = entity.Id;
@@ -26,6 +37,33 @@ namespace EOS.Tags
 
             _scratch.Clear();
             for (int i = 0; i < tags.Length; i++) ResolveInto(tags[i], _scratch);
+            AddScratchBits(id);
+        }
+
+        public void Remove(EosEntity entity, object tag)
+        {
+            int id = entity.Id;
+            if (id < 0 || id >= _entityCapacity || tag == null) return;
+            if (!entity.IsValid) return;
+
+            _scratch.Clear();
+            ResolveInto(tag, _scratch);
+            RemoveScratchBits(id);
+        }
+
+        public void Remove(EosEntity entity, params object[] tags)
+        {
+            int id = entity.Id;
+            if (id < 0 || id >= _entityCapacity || tags == null) return;
+            if (!entity.IsValid) return;
+
+            _scratch.Clear();
+            for (int i = 0; i < tags.Length; i++) ResolveInto(tags[i], _scratch);
+            RemoveScratchBits(id);
+        }
+
+        void AddScratchBits(int id)
+        {
             if (_scratch.Count == 0) return;
 
             EnsureEntity(id);
@@ -37,15 +75,8 @@ namespace EOS.Tags
             }
         }
 
-        public void Remove(EosEntity entity, params object[] tags)
+        void RemoveScratchBits(int id)
         {
-            int id = entity.Id;
-            if (id < 0 || id >= _entityCapacity || tags == null) return;
-            if (!entity.IsValid) return;
-
-            _scratch.Clear();
-            for (int i = 0; i < tags.Length; i++) ResolveInto(tags[i], _scratch);
-
             int b = id * _words;
             for (int i = 0; i < _scratch.Count; i++)
             {
@@ -76,15 +107,20 @@ namespace EOS.Tags
         {
             if (enumType == null || !enumType.IsEnum) return false;
 
-            _scratch.Clear();
-            bool flags = Attribute.IsDefined(enumType, typeof(FlagsAttribute));
-            foreach (var member in Enum.GetValues(enumType))
+            if (!_anyInMasks.TryGetValue(enumType, out var mask))
             {
-                long m = Convert.ToInt64(member);
-                if (flags && m == 0) continue;
-                AddBit(_registry.InternEnum(enumType, m), _scratch);
+                _scratch.Clear();
+                var info = EnumInfoOf(enumType);
+                for (int i = 0; i < info.Values.Length; i++)
+                {
+                    long m = info.Values[i];
+                    if (info.Flags && m == 0) continue;
+                    AddBit(_registry.InternEnum(enumType, m), _scratch);
+                }
+                mask = MaskFromScratch();
+                _anyInMasks[enumType] = mask;
             }
-            return MatchAny(entity, MaskFromScratch());
+            return MatchAny(entity, mask);
         }
 
         public void ClearEntity(EosEntity entity)
@@ -240,12 +276,13 @@ namespace EOS.Tags
         {
             var type = e.GetType();
             long value = Convert.ToInt64(e);
+            var info = EnumInfoOf(type);
 
-            if (Attribute.IsDefined(type, typeof(FlagsAttribute)))
+            if (info.Flags)
             {
-                foreach (var member in Enum.GetValues(type))
+                for (int i = 0; i < info.Values.Length; i++)
                 {
-                    long m = Convert.ToInt64(member);
+                    long m = info.Values[i];
                     if (m != 0 && (value & m) == m)
                         AddBit(_registry.InternEnum(type, m), bits);
                 }
@@ -254,6 +291,33 @@ namespace EOS.Tags
             {
                 AddBit(_registry.InternEnum(type, value), bits);
             }
+        }
+
+        sealed class EnumTagInfo
+        {
+            public bool Flags;
+            public long[] Values;
+        }
+
+        static readonly Dictionary<Type, EnumTagInfo> _enumInfo = new();
+        readonly Dictionary<Type, ulong[]> _anyInMasks = new();
+
+        static EnumTagInfo EnumInfoOf(Type type)
+        {
+            if (_enumInfo.TryGetValue(type, out var info)) return info;
+
+            var raw = Enum.GetValues(type);
+            var values = new long[raw.Length];
+            for (int i = 0; i < raw.Length; i++)
+                values[i] = Convert.ToInt64(raw.GetValue(i));
+
+            info = new EnumTagInfo
+            {
+                Flags = Attribute.IsDefined(type, typeof(FlagsAttribute)),
+                Values = values
+            };
+            _enumInfo[type] = info;
+            return info;
         }
 
         void AddBit(int index, List<int> bits)

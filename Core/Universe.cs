@@ -93,7 +93,21 @@ namespace EOS.Core
                 EosLog.Error("Cannot create a new world while the universe is iterating. Wait until the current update cycle is finished.");
                 return null;
             }
-            
+            if (!string.IsNullOrEmpty(key))
+            {
+                if (_defaultWorld?.Key == key)
+                {
+                    EosLog.Error($"World key '{key}' is already used by the default world.");
+                    return null;
+                }
+                foreach (var existing in _otherWorlds)
+                {
+                    if (existing?.Key != key) continue;
+                    EosLog.Error($"World key '{key}' is already used by world #{existing.Id}.");
+                    return null;
+                }
+            }
+
             var world = new World();
             world.SetId(_nextId++);
             world.SetKey(key);
@@ -151,15 +165,16 @@ namespace EOS.Core
             if (!IsEnabled) return;
             
             BeginIteration();
-            
-            if (_defaultWorld is { IsManualUpdate: false })
-                _defaultWorld.Update(deltaTime);
+            try
+            {
+                if (_defaultWorld is { IsManualUpdate: false })
+                    _defaultWorld.Update(deltaTime);
 
-            foreach (var world in _otherWorlds)
-                if (world is { IsManualUpdate: false })
-                    world.Update(deltaTime);
-            
-            EndIteration();
+                foreach (var world in _otherWorlds)
+                    if (world is { IsManualUpdate: false })
+                        world.Update(deltaTime);
+            }
+            finally { EndIteration(); }
         }
         public static void Tick(float realDelta, float fixedStep = 1f / 60f, int maxSteps = 8)
         {
@@ -191,15 +206,16 @@ namespace EOS.Core
             if (!IsEnabled) return;
             
             BeginIteration();
-            
-            if (_defaultWorld is { IsManualUpdate: false })
-                _defaultWorld.FixedUpdate(deltaTime);
+            try
+            {
+                if (_defaultWorld is { IsManualUpdate: false })
+                    _defaultWorld.FixedUpdate(deltaTime);
 
-            foreach (var world in _otherWorlds)
-                if (world is { IsManualUpdate: false })
-                    world.FixedUpdate(deltaTime);
-            
-            EndIteration();
+                foreach (var world in _otherWorlds)
+                    if (world is { IsManualUpdate: false })
+                        world.FixedUpdate(deltaTime);
+            }
+            finally { EndIteration(); }
         }
         public static void LateUpdate(float deltaTime)
         {
@@ -211,15 +227,16 @@ namespace EOS.Core
             if (!IsEnabled) return;
             
             BeginIteration();
-            
-            if (_defaultWorld is { IsManualUpdate: false })
-                _defaultWorld.LateUpdate(deltaTime);
+            try
+            {
+                if (_defaultWorld is { IsManualUpdate: false })
+                    _defaultWorld.LateUpdate(deltaTime);
 
-            foreach (var world in _otherWorlds)
-                if (world is { IsManualUpdate: false })
-                    world.LateUpdate(deltaTime);
-            
-            EndIteration();
+                foreach (var world in _otherWorlds)
+                    if (world is { IsManualUpdate: false })
+                        world.LateUpdate(deltaTime);
+            }
+            finally { EndIteration(); }
         }
 
         public static void DebugDraw()

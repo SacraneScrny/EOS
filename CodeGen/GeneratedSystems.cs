@@ -39,6 +39,7 @@ namespace EOS.CodeGen
         static readonly Dictionary<string, SystemInvoker> EmptyInvokers = new();
         static readonly Dictionary<string, SystemBodyBinder> EmptyBodies = new();
         static readonly Dictionary<string, EventBodyBinder> EmptyEventBodies = new();
+        static readonly Dictionary<string, string> EmptyShapeHashes = new();
 
         public Type SystemType { get; }
 
@@ -46,19 +47,22 @@ namespace EOS.CodeGen
         readonly Dictionary<string, SystemInvoker> _invokers;
         readonly Dictionary<string, SystemBodyBinder> _bodies;
         readonly Dictionary<string, EventBodyBinder> _eventBodies;
+        readonly Dictionary<string, string> _shapeHashes;
 
         public GeneratedSystem(
             Type systemType,
             Func<EosSystem> factory,
             Dictionary<string, SystemInvoker> invokers,
             Dictionary<string, SystemBodyBinder> bodies,
-            Dictionary<string, EventBodyBinder> eventBodies)
+            Dictionary<string, EventBodyBinder> eventBodies,
+            Dictionary<string, string> shapeHashes = null)
         {
             SystemType = systemType;
             _factory = factory;
             _invokers = invokers ?? EmptyInvokers;
             _bodies = bodies ?? EmptyBodies;
             _eventBodies = eventBodies ?? EmptyEventBodies;
+            _shapeHashes = shapeHashes ?? EmptyShapeHashes;
         }
 
         public EosSystem Create() => _factory();
@@ -71,6 +75,9 @@ namespace EOS.CodeGen
 
         public EventBodyBinder GetEventBody(string signature)
             => _eventBodies.TryGetValue(signature, out var body) ? body : null;
+
+        public string GetShapeHash(string signature)
+            => _shapeHashes.TryGetValue(signature, out var hash) ? hash : null;
     }
 
     public static class GeneratedQuery

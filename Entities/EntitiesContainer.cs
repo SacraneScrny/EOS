@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using EOS.Core;
+using EOS.Logging;
 using EOS.Storage;
 
 namespace EOS.Entities
@@ -78,7 +79,16 @@ namespace EOS.Entities
             if (!IsValid(entity)) return;
             int id = entity.Id;
             if (_idToKey.TryGetValue(id, out var old)) _keyToId.Remove(old);
-            if (!string.IsNullOrEmpty(key)) { _keyToId[key] = id; _idToKey[id] = key; }
+            if (!string.IsNullOrEmpty(key))
+            {
+                if (_keyToId.TryGetValue(key, out int previousOwner) && previousOwner != id)
+                {
+                    EosLog.Warning($"Stable key '{key}' reassigned from entity {previousOwner} to entity {id}", nameof(EntitiesContainer));
+                    _idToKey.Remove(previousOwner);
+                }
+                _keyToId[key] = id;
+                _idToKey[id] = key;
+            }
             else _idToKey.Remove(id);
         }
 

@@ -55,25 +55,25 @@ namespace EOS.Queries
         public EntityQuery<T1, T2, T3> WithOneTag(params object[] tags)
             => new(_world, _s1, _s2, _s3, _filter.One(_world.Tags, _world.Tags.BuildMask(tags)));
 
-        public Enumerator GetEnumerator() => new(_s1, _s2, _s3, _filter);
+        public Enumerator GetEnumerator() => new(_world, _s1, _s2, _s3, _filter);
 
         public bool Any()
         {
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             return e.MoveNext();
         }
 
         public int Count()
         {
             int n = 0;
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             while (e.MoveNext()) n++;
             return n;
         }
 
         public bool TryFirst(out QueryResult<T1, T2, T3> result)
         {
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             if (e.MoveNext())
             {
                 result = e.Current;
@@ -86,7 +86,7 @@ namespace EOS.Queries
         public void ForEach(Action<T1, T2, T3> action)
         {
             if (action == null) return;
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             while (e.MoveNext())
             {
                 var r = e.Current;
@@ -97,7 +97,7 @@ namespace EOS.Queries
         public void ForEach(Action<EosEntity, T1, T2, T3> action)
         {
             if (action == null) return;
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             while (e.MoveNext())
             {
                 var r = e.Current;
@@ -108,13 +108,14 @@ namespace EOS.Queries
         public List<QueryResult<T1, T2, T3>> ToList()
         {
             var list = new List<QueryResult<T1, T2, T3>>();
-            var e = GetEnumerator();
+            using var e = GetEnumerator();
             while (e.MoveNext()) list.Add(e.Current);
             return list;
         }
 
-        public struct Enumerator
+        public struct Enumerator : IDisposable
         {
+            readonly IReadOnlyWorld _world;
             readonly Storage<T1> _s1;
             readonly Storage<T2> _s2;
             readonly Storage<T3> _s3;
@@ -124,8 +125,13 @@ namespace EOS.Queries
             int _index;
             QueryResult<T1, T2, T3> _current;
 
-            internal Enumerator(Storage<T1> s1, Storage<T2> s2, Storage<T3> s3, QueryFilter filter)
+            bool _isDisposed;
+
+            internal Enumerator(IReadOnlyWorld world, Storage<T1> s1, Storage<T2> s2, Storage<T3> s3, QueryFilter filter)
             {
+                _isDisposed = false;
+
+                _world = world;
                 _s1 = s1;
                 _s2 = s2;
                 _s3 = s3;
@@ -140,12 +146,15 @@ namespace EOS.Queries
 
                 _index = -1;
                 _current = default;
+
+                _world.BeginIterationInternal();
             }
 
             public QueryResult<T1, T2, T3> Current => _current;
 
             public bool MoveNext()
             {
+                if (_isDisposed) throw new ObjectDisposedException(nameof(Enumerator));
                 while (++_index < _count)
                 {
                     EosEntity entity;
@@ -183,6 +192,15 @@ namespace EOS.Queries
                     return true;
                 }
                 return false;
+            }
+
+            public void Dispose()
+            {
+                if (!_isDisposed)
+                {
+                    _isDisposed = true;
+                    _world.EndIterationInternal();
+                }
             }
         }
     }
