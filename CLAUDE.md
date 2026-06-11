@@ -75,7 +75,7 @@ Stable keys (`SetStableKey` / `TryFind` / `GetStableKey`) give an entity a seria
 
 ### Hierarchy (parent-child)
 
-`World.Hierarchy` (`HierarchyContainer`, namespace `EOS.Hierarchy`) is a per-world parent→children graph, stored like `TagsContainer`: sparse arrays indexed by entity id (`_parents` / `_firstChild` / `_nextSibling` / `_prevSibling` intrusive linked list + `_childCount` + `_branchActive` effective-active cache). All operations are O(1) or O(depth); reads are alloc-free.
+`World.Hierarchy` (`HierarchyContainer`, namespace `EOS.Hierarchy`) is a per-world parent→children graph, stored like `TagsContainer`: sparse arrays indexed by entity id (`_parents` / `_firstChild` / `_nextSibling` / `_prevSibling` intrusive linked list + `_childCount` + `_branchActive` effective-active cache + `_root` cached-root). Reads are alloc-free and O(1) — `GetRoot` is a direct `_root[id]` lookup, not an ancestor walk. The only O(subtree) work is the reparent propagation: `SetParent`/`Detach` push the new root (and the effective-active flip) down the moved subtree, the same way `_branchActive` propagates.
 
 The entity-facing surface lives in `EOS.Extensions.HierarchyExtensions`: `SetParent(parent)` / `Detach()` (or `SetParent` with `EosEntity.Null`), `GetParent` / `HasParent` / `GetRoot`, `ChildCount` / `Children()` (struct enumerator) / `GetChildren(list, recursive)` (BFS), `IsChildOf` / `IsDescendantOf`, `DetachChildren()`, `CreateChild(name, active = false, isSerializable = true)`. The ECB fluent API mirrors `SetParent(EosEntity | DeferredEntity)` and `Detach()` for deferred use from systems.
 

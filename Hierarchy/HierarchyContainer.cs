@@ -15,6 +15,7 @@ namespace EOS.Hierarchy
         int[] _prevSibling;
         int[] _childCount;
         bool[] _branchActive;
+        int[] _root;
         int _capacity;
 
         readonly Stack<int> _walk = new();
@@ -28,6 +29,7 @@ namespace EOS.Hierarchy
             _prevSibling = new int[_capacity];
             _childCount = new int[_capacity];
             _branchActive = new bool[_capacity];
+            _root = new int[_capacity];
             ClearSlots(0, _capacity);
         }
 
@@ -67,6 +69,7 @@ namespace EOS.Hierarchy
             var oldParent = ParentOf(child.Id);
             Unlink(child.Id);
             Link(parent.Id, child.Id);
+            PropagateRoot(child.Id, _root[parent.Id]);
             Refresh(child);
             World.Event(new ParentChanged(child, oldParent, parent));
             return true;
@@ -87,8 +90,7 @@ namespace EOS.Hierarchy
             if (entity.World != World || !entity.IsValid) return EosEntity.Null;
             int id = entity.Id;
             if (id >= _capacity) return entity;
-            while (_parents[id] >= 0) id = _parents[id];
-            return World.Entities.EntityFromId(id);
+            return World.Entities.EntityFromId(_root[id]);
         }
 
         public bool IsDescendantOf(EosEntity entity, EosEntity ancestor)
@@ -152,6 +154,7 @@ namespace EOS.Hierarchy
             _prevSibling[id] = -1;
             _childCount[id] = 0;
             _branchActive[id] = active;
+            _root[id] = id;
         }
 
         internal void OnSelfActiveChanged(EosEntity entity)
@@ -172,6 +175,7 @@ namespace EOS.Hierarchy
             }
             Unlink(id);
             _branchActive[id] = false;
+            _root[id] = id;
         }
 
         internal void Reset()
@@ -186,6 +190,7 @@ namespace EOS.Hierarchy
             if (id >= _capacity || _parents[id] < 0) return true;
             var oldParent = ParentOf(id);
             Unlink(id);
+            PropagateRoot(id, id);
             Refresh(child);
             World.Event(new ParentChanged(child, oldParent, EosEntity.Null));
             return true;
@@ -265,6 +270,19 @@ namespace EOS.Hierarchy
             }
         }
 
+        void PropagateRoot(int id, int root)
+        {
+            _walk.Clear();
+            _walk.Push(id);
+            while (_walk.Count > 0)
+            {
+                int current = _walk.Pop();
+                _root[current] = root;
+                for (int child = _firstChild[current]; child >= 0; child = _nextSibling[child])
+                    _walk.Push(child);
+            }
+        }
+
         void EnsureCapacity(int id)
         {
             if (id < _capacity) return;
@@ -276,6 +294,7 @@ namespace EOS.Hierarchy
             Array.Resize(ref _prevSibling, cap);
             Array.Resize(ref _childCount, cap);
             Array.Resize(ref _branchActive, cap);
+            Array.Resize(ref _root, cap);
             ClearSlots(_capacity, cap);
             _capacity = cap;
         }
@@ -290,6 +309,7 @@ namespace EOS.Hierarchy
                 _prevSibling[i] = -1;
                 _childCount[i] = 0;
                 _branchActive[i] = false;
+                _root[i] = i;
             }
         }
 
