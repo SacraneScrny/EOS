@@ -35,6 +35,24 @@ namespace EOS.Objects
             Entity.World.Objects.RegisterObject(this);
         }
 
+        internal void ResetForReuse()
+        {
+            IsAwaken = false;
+            IsStarted = false;
+            IsDisposed = false;
+            IsFailed = false;
+            HasEntity = false;
+            IsDeserialized = false;
+            _enabled = true;
+            Entity = EosEntity.Null;
+            UpdateIndex = -1;
+            FixedIndex = -1;
+            LateIndex = -1;
+            PoolIndex = -1;
+            Initialized = false;
+            _disposables = null;
+        }
+
         internal void Awake()
         {
             if (!HasEntity || IsAwaken) return;
