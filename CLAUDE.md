@@ -67,9 +67,25 @@ Only `Systems.*` and `Objects.*` run inside the iteration guard. The `Before*/Af
 
 Entities live in `EntitiesContainer` (alive list + free stack for ID reuse, sparse `_exists` / `_versions` arrays). Validity is `_exists[id] && _versions[id] == entity.Version`. `All()` returns an alloc-free struct enumerator over alive entities.
 
-**Entities are created inactive by default.** The public constructor is `EosEntity(World world, string name = "", bool active = false, bool isSerializable = true)` (blank names normalize to `"Entity"`). `InitializeSystems` skips Awake/Start for components on an inactive entity — they sit waiting until the entity is activated. Activate with `entity.On()` (or `World.Entities.SetActive`). Entities created through an `EntityCommandBuffer.Create(...)` are constructed with `active: true`. Toggling active re-runs `RefreshReady` across the entity's components.
+**Entities are created inactive by default.** The public constructor is `EosEntity(World world, string name = "", bool active = false, bool isSerializable = true)` (blank names normalize to `"Entity"`). `InitializeSystems` skips Awake/Start for components on an inactive entity — they sit waiting until the entity is activated. Activate with `entity.On()` (or `World.Entities.SetActive`). Entities created through an `EntityCommandBuffer.Create(...)` are constructed with `active: true`. Toggling active re-runs `RefreshReady` across the entity's components (propagated through the hierarchy, see below).
+
+**Active state is hierarchical** (Unity semantics): `IsActive` is the *effective* state — the entity's own flag AND every ancestor's. `IsActiveSelf` is the own flag alone (what `SetActive` writes, what serialization captures). `EosObject.IsEnabled`, `InitializeSystems`, queries and per-object updates all gate on the effective `IsActive`, so deactivating a parent silently suspends the whole subtree; effective-state flips refresh readiness only for the entities that actually changed.
 
 Stable keys (`SetStableKey` / `TryFind` / `GetStableKey`) give an entity a serialization-stable string handle independent of its runtime id.
+
+### Hierarchy (parent-child)
+
+`World.Hierarchy` (`HierarchyContainer`, namespace `EOS.Hierarchy`) is a per-world parent→children graph, stored like `TagsContainer`: sparse arrays indexed by entity id (`_parents` / `_firstChild` / `_nextSibling` / `_prevSibling` intrusive linked list + `_childCount` + `_branchActive` effective-active cache). All operations are O(1) or O(depth); reads are alloc-free.
+
+The entity-facing surface lives in `EOS.Extensions.HierarchyExtensions`: `SetParent(parent)` / `Detach()` (or `SetParent` with `EosEntity.Null`), `GetParent` / `HasParent` / `GetRoot`, `ChildCount` / `Children()` (struct enumerator) / `GetChildren(list, recursive)` (BFS), `IsChildOf` / `IsDescendantOf`, `DetachChildren()`, `CreateChild(name, active = false, isSerializable = true)`. The ECB fluent API mirrors `SetParent(EosEntity | DeferredEntity)` and `Detach()` for deferred use from systems.
+
+Semantics:
+
+- **Reparenting is not a structural change** (same class as `SetActive`/tags) — allowed mid-iteration; every link change emits a `ParentChanged { Child, OldParent, NewParent }` struct event.
+- **Destroy cascades**: `entity.Destroy()` destroys the whole subtree, children first (`HierarchyContainer.OnEntityDestroying` drives child `Destroy` before the parent's own teardown, so child components dispose while the parent is still alive). Call `DetachChildren()` first to spare them. The cascade goes through normal `Destroy`, so `StructuralChangePolicy` applies as usual.
+- Cycles are rejected at `SetParent` (error log), as are self-parenting, cross-world links and stale handles. Links are cleaned eagerly on destroy, so stored ids always refer to alive entities. Child order is unspecified.
+- Detach test is `parent.World == null` (covers both `EosEntity.Null` and `default` — `default(EosEntity)` has `Id = 0`, so never compare against `Null` by id).
+- Serialization: `EntityRecord.ParentLocalId` (default `-1`) round-trips links; `Restore` relinks in a second pass after all entities exist, so record order doesn't matter. `record.Active` stores `IsActiveSelf` — effective state is recomputed from the restored links.
 
 ### Components
 
@@ -180,7 +196,7 @@ Lifecycle each phase: `Promote` moves staging → live with ascending sequence n
 
 `World.BeforeAll / BeforeUpdate / AfterUpdate / BeforeFixedUpdate / AfterFixedUpdate / BeforeLateUpdate / AfterLateUpdate / AfterAll` are `EntityCommandBuffer` instances exposed as `IEntityCommandScheduler` (plus `AfterCurrentPhase`, which picks the after-buffer of the running phase). Use them to defer `Create`, `Add<T>`, `Remove<T>`, `Destroy` (and tag mutations) when calling from inside a system's `Execute`. Each buffer executes at its matching point in the frame loop above.
 
-The fluent API (`CommandChain` / `BoundSchedule`) chains conditionals and ops: `Schedule(entity)` or `Create(name = "", isSerializable = true)` then `When<T>` / `If` / `WhenTag` / `WhenNoTag` / `WhenAnyTag` / `WhenOneTag`, `Add<T>` / `Add<T>(configure)` / `Change<T>` / `ChangeOrAdd<T>` / `Remove<T>` / `Destroy`, `AddTag` / `RemoveTag` / `SetFlag` / `ClearTags`. `Create` returns a `DeferredEntity` (`Value`, `IsResolved`) you can schedule further ops against; it resolves when the buffer runs, and the created entity is **active immediately**. Semantics: a false condition **short-circuits the rest of that chain**; `Add<T>` is add-if-missing (the configure callback only runs for a fresh add); `Change<T>` mutates only if present; `ChangeOrAdd<T>` always acts. `Execute()` drains ops scheduled during execution in the same pass, with a 10 000-op runaway guard that clears the buffer and logs an error. A standalone `CommandChain` can be reused across entities via `Schedule(entity, chain)` (ops are copied).
+The fluent API (`CommandChain` / `BoundSchedule`) chains conditionals and ops: `Schedule(entity)` or `Create(name = "", isSerializable = true)` then `When<T>` / `If` / `WhenTag` / `WhenNoTag` / `WhenAnyTag` / `WhenOneTag`, `Add<T>` / `Add<T>(configure)` / `Change<T>` / `ChangeOrAdd<T>` / `Remove<T>` / `Destroy`, `SetParent(EosEntity | DeferredEntity)` / `Detach`, `AddTag` / `RemoveTag` / `SetFlag` / `ClearTags`. `Create` returns a `DeferredEntity` (`Value`, `IsResolved`) you can schedule further ops against; it resolves when the buffer runs, and the created entity is **active immediately**. Semantics: a false condition **short-circuits the rest of that chain**; `Add<T>` is add-if-missing (the configure callback only runs for a fresh add); `Change<T>` mutates only if present; `ChangeOrAdd<T>` always acts. `Execute()` drains ops scheduled during execution in the same pass, with a 10 000-op runaway guard that clears the buffer and logs an error. A standalone `CommandChain` can be reused across entities via `Schedule(entity, chain)` (ops are copied).
 
 `StructuralChangePolicy` (default `Throw`) enforces deferral: direct structural changes during system iteration throw `InvalidOperationException`. Set to `Warn` or `Allow` to mutate in place.
 

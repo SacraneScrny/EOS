@@ -55,6 +55,22 @@ namespace EOS.Systems.CommandBuffer
             return this;
         }
 
+        public CommandChain SetParent(EosEntity parent)
+        {
+            Ops.Add(e => { e.SetParent(parent); return true; });
+            return this;
+        }
+        public CommandChain SetParent(DeferredEntity parent)
+        {
+            Ops.Add(e => { if (parent.IsResolved) e.SetParent(parent.Value); return true; });
+            return this;
+        }
+        public CommandChain Detach()
+        {
+            Ops.Add(e => { e.Detach(); return true; });
+            return this;
+        }
+
         public CommandChain WhenTag(params object[] tags)
         {
             Ops.Add(e => e.HasAllTags(tags));

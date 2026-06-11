@@ -32,6 +32,7 @@ namespace EOS.Entities
             if (!IsValid(entity)) return string.Empty;
             return _names[entity.Id] ?? string.Empty;
         }
+        internal EosEntity EntityFromId(int id) => new(id, _versions[id], World);
 
         public AliveEntities All() => new(this);
         public void ForEach(Action<EosEntity> action)
@@ -53,6 +54,7 @@ namespace EOS.Entities
             _serializable[id] = isSerializable;
             _aliveIndex[id] = _alive.Count;
             _alive.Add(id);
+            World.Hierarchy.OnEntityCreated(id, active);
 
             return (id, _versions[id], name);
         }
@@ -107,6 +109,11 @@ namespace EOS.Entities
         public bool IsActive(EosEntity entity)
         {
             int id = entity.Id;
+            return id >= 0 && id < _exists.Length && _exists[id] && _versions[id] == entity.Version && World.Hierarchy.IsBranchActive(id);
+        }
+        public bool IsActiveSelf(EosEntity entity)
+        {
+            int id = entity.Id;
             return id >= 0 && id < _exists.Length && _exists[id] && _actives[id] && _versions[id] == entity.Version;
         }
         public void SetActive(EosEntity entity, bool active)
@@ -114,13 +121,14 @@ namespace EOS.Entities
             if (!IsValid(entity)) return;
             if (_actives[entity.Id] == active) return;
             _actives[entity.Id] = active;
-            World.ObjectsStorages.RefreshReadyAll(entity);
+            World.Hierarchy.OnSelfActiveChanged(entity);
         }
 
         public void Destroy(EosEntity entity)
         {
             if (!IsValid(entity)) return;
             if (!World.GuardStructuralChange($"Destroy entity '{GetName(entity)}'")) return;
+            World.Hierarchy.OnEntityDestroying(entity);
             int id = entity.Id;
 
             if (_idToKey.TryGetValue(id, out var stableKey))
