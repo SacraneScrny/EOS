@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+
+using EOS.Logging;
 using EOS.Serialization;
 
 namespace EOS.Core
@@ -7,7 +9,12 @@ namespace EOS.Core
     {
         static int _nextId = 0;
         public static bool IsEnabled { get; private set; }
-
+        public static bool IsBooted { get; private set; }
+        
+        public static bool IsIterating { get; private set; }
+        static void BeginIteration() => IsIterating = true;
+        static void EndIteration() => IsIterating = false;
+        
         static float _accumulator;
 
         static World _defaultWorld;
@@ -31,20 +38,76 @@ namespace EOS.Core
             _defaultWorld.SetId(_nextId++);
             _defaultWorld.Init();
             _accumulator = 0f;
+            
             IsEnabled = true;
+            IsBooted = true;
+            IsIterating = false;
 
-            var snapshot = WorldLoader.OnLoad?.Invoke();
-            if (snapshot != null)
-                WorldSerializer.Restore(snapshot);
+            try
+            {
+                var snapshot = WorldLoader.OnLoad?.Invoke();
+                if (snapshot != null)
+                    WorldSerializer.Restore(snapshot);
+            }
+            catch (System.Exception ex)
+            {
+                EosLog.Error($"Failed to load universe snapshot: {ex}");
+            }
         }
         public static void Reset()
         {
-            _defaultWorld.Reset();
-            foreach (var world in _otherWorlds) world.Reset();
+            if (!IsBooted) return;
+
+            if (IsIterating)
+            {
+                EosLog.Error("Cannot reset the universe while it is iterating. Wait until the current update cycle is finished.");
+                return;
+            }
+            
+            _defaultWorld?.Reset();
+            foreach (var world in _otherWorlds) world?.Reset();
+            IsEnabled = true;
+            IsIterating = false;
+        }
+        public static void Shutdown()
+        {
+            _defaultWorld?.Dispose();
+            foreach (var w in _otherWorlds) w?.Dispose();
+            _otherWorlds.Clear();
+            _nextId = 0;
+            _accumulator = 0;
+            IsEnabled = false;
+            IsBooted = false;
+            IsIterating = false;
         }
 
         public static World CreateWorld(string key = null, bool isSerializable = true)
         {
+            if (!IsBooted)
+            {
+                EosLog.Error("Universe is not booted. Call Universe.Boot() before creating worlds.");
+                return null;
+            }
+            if (IsIterating)
+            {
+                EosLog.Error("Cannot create a new world while the universe is iterating. Wait until the current update cycle is finished.");
+                return null;
+            }
+            if (!string.IsNullOrEmpty(key))
+            {
+                if (_defaultWorld?.Key == key)
+                {
+                    EosLog.Error($"World key '{key}' is already used by the default world.");
+                    return null;
+                }
+                foreach (var existing in _otherWorlds)
+                {
+                    if (existing?.Key != key) continue;
+                    EosLog.Error($"World key '{key}' is already used by world #{existing.Id}.");
+                    return null;
+                }
+            }
+
             var world = new World();
             world.SetId(_nextId++);
             world.SetKey(key);
@@ -53,9 +116,15 @@ namespace EOS.Core
             _otherWorlds.Add(world);
             return world;
         }
-
         public static bool TryGetWorld(string key, out World world)
         {
+            if (!IsBooted)
+            {
+                EosLog.Error("Universe is not booted. Call Universe.Boot() before getting worlds.");
+                world = null;
+                return false;
+            }
+            
             if (!string.IsNullOrEmpty(key))
             {
                 if (_defaultWorld?.Key == key) { world = _defaultWorld; return true; }
@@ -65,9 +134,20 @@ namespace EOS.Core
             world = null;
             return false;
         }
-
         public static bool DestroyWorld(World world)
         {
+            if (!IsBooted)
+            {
+                EosLog.Error("Universe is not booted. Call Universe.Boot() before destroying worlds.");
+                return false;
+            }
+
+            if (IsIterating)
+            {
+                EosLog.Error("Cannot destroy a world while the universe is iterating. Wait until the current update cycle is finished.");
+                return false;
+            }
+            
             if (world == null || world.IsDisposed) return false;
             if (world.Equals(_defaultWorld)) return false;
             if (!_otherWorlds.Remove(world)) return false;
@@ -77,17 +157,32 @@ namespace EOS.Core
 
         public static void Update(float deltaTime)
         {
+            if (!IsBooted)
+            {
+                EosLog.Error("Universe is not booted. Call Universe.Boot() before updating.");
+                return;
+            }
             if (!IsEnabled) return;
-            if (!_defaultWorld.IsManualUpdate)
-                _defaultWorld.Update(deltaTime);
+            
+            BeginIteration();
+            try
+            {
+                if (_defaultWorld is { IsManualUpdate: false })
+                    _defaultWorld.Update(deltaTime);
 
-            foreach (var world in _otherWorlds)
-                if (!world.IsManualUpdate)
-                    world.Update(deltaTime);
+                foreach (var world in _otherWorlds)
+                    if (world is { IsManualUpdate: false })
+                        world.Update(deltaTime);
+            }
+            finally { EndIteration(); }
         }
-
         public static void Tick(float realDelta, float fixedStep = 1f / 60f, int maxSteps = 8)
         {
+            if (!IsBooted)
+            {
+                EosLog.Error("Universe is not booted. Call Universe.Boot() before updating.");
+                return;
+            }
             if (!IsEnabled) return;
             if (fixedStep <= 0f) { Update(realDelta); return; }
 
@@ -99,38 +194,79 @@ namespace EOS.Core
                 _accumulator -= fixedStep;
                 steps++;
             }
-            if (steps >= maxSteps) _accumulator = 0f;
+            if (_accumulator >= fixedStep) _accumulator = 0f;
         }
         public static void FixedUpdate(float deltaTime)
         {
+            if (!IsBooted)
+            {
+                EosLog.Error("Universe is not booted. Call Universe.Boot() before updating.");
+                return;
+            }
             if (!IsEnabled) return;
-            if (!_defaultWorld.IsManualUpdate)
-                _defaultWorld.FixedUpdate(deltaTime);
+            
+            BeginIteration();
+            try
+            {
+                if (_defaultWorld is { IsManualUpdate: false })
+                    _defaultWorld.FixedUpdate(deltaTime);
 
-            foreach (var world in _otherWorlds)
-                if (!world.IsManualUpdate)
-                    world.FixedUpdate(deltaTime);
+                foreach (var world in _otherWorlds)
+                    if (world is { IsManualUpdate: false })
+                        world.FixedUpdate(deltaTime);
+            }
+            finally { EndIteration(); }
         }
         public static void LateUpdate(float deltaTime)
         {
+            if (!IsBooted)
+            {
+                EosLog.Error("Universe is not booted. Call Universe.Boot() before updating.");
+                return;
+            }
             if (!IsEnabled) return;
-            if (!_defaultWorld.IsManualUpdate)
-                _defaultWorld.LateUpdate(deltaTime);
+            
+            BeginIteration();
+            try
+            {
+                if (_defaultWorld is { IsManualUpdate: false })
+                    _defaultWorld.LateUpdate(deltaTime);
 
-            foreach (var world in _otherWorlds)
-                if (!world.IsManualUpdate)
-                    world.LateUpdate(deltaTime);
+                foreach (var world in _otherWorlds)
+                    if (world is { IsManualUpdate: false })
+                        world.LateUpdate(deltaTime);
+            }
+            finally { EndIteration(); }
         }
 
         public static void DebugDraw()
         {
+            if (!IsBooted) return;
             if (!IsEnabled) return;
             _defaultWorld.DebugDraw();
             foreach (var world in _otherWorlds)
                 world.DebugDraw();
         }
 
-        public static void On() => IsEnabled = true;
-        public static void Off() => IsEnabled = false;
+        public static void On()
+        {
+            if (!IsBooted) return;
+            if (IsIterating)
+            {
+                EosLog.Error("Cannot enable the universe while it is iterating. Wait until the current update cycle is finished.");
+                return;
+            }
+            IsEnabled = true;
+        }
+        public static void Off()
+        {
+            if (!IsBooted) return;
+            if (IsIterating)
+            {
+                EosLog.Error("Cannot disable the universe while it is iterating. Wait until the current update cycle is finished.");
+                return;
+            }
+            IsEnabled = false;
+        }
     }
 }

@@ -7,7 +7,7 @@ using EOS.Logging;
 
 namespace EOS.Systems.CommandBuffer
 {
-    public interface IReadOnlyEntityCommandBuffer
+    public interface IEntityCommandScheduler
     {
         public DeferredEntity Create(string name = "", bool isSerializable = true);
         public BoundSchedule Schedule(EosEntity entity);
@@ -15,7 +15,7 @@ namespace EOS.Systems.CommandBuffer
         public void Schedule(EosEntity entity, CommandChain chain);
         public void Schedule(DeferredEntity deferred, CommandChain chain);
     }
-    public class EntityCommandBuffer : IReadOnlyEntityCommandBuffer
+    public class EntityCommandBuffer : IEntityCommandScheduler
     {
         readonly World _world;
         public EntityCommandBuffer(World world) => _world = world;
@@ -44,43 +44,71 @@ namespace EOS.Systems.CommandBuffer
             return new BoundSchedule(chain, this);
         }
         public void Schedule(EosEntity entity, CommandChain chain)
-            => _batches.Add((entity, chain.Ops));
+            => _batches.Add((entity, new List<Func<EosEntity, bool>>(chain.Ops)));
         public void Schedule(DeferredEntity deferred, CommandChain chain)
-            => _deferredBatches.Add((deferred, chain.Ops));
+            => _deferredBatches.Add((deferred, new List<Func<EosEntity, bool>>(chain.Ops)));
 
         public void Execute()
         {
-            for (int i = 0; i < _creates.Count; i++)
+            int createIndex = 0;
+            int batchIndex = 0;
+            int deferredBatchIndex = 0;
+            
+            int totalOperationsProcessed = 0;
+            const int MAX_DRAIN_OPERATIONS = 10000; 
+
+            while (createIndex < _creates.Count || 
+                   batchIndex < _batches.Count || 
+                   deferredBatchIndex < _deferredBatches.Count)
             {
-                var (name, isSerializable, deferred) = _creates[i];
-                try
+                totalOperationsProcessed++;
+                if (totalOperationsProcessed > MAX_DRAIN_OPERATIONS)
                 {
-                    deferred.Value = new EosEntity(_world, name, true, isSerializable);
-                    deferred.IsResolved = true;
+                    EosLog.Error($"EntityCommandBuffer drain exceeded maximum operations ({MAX_DRAIN_OPERATIONS}). Possible infinite loop detected. Clearing buffer.", nameof(EntityCommandBuffer));
+                    Clear();
+                    return;
                 }
-                catch (Exception ex)
+
+                while (createIndex < _creates.Count)
                 {
-                    EosLog.Error($"Failed to create entity '{name}': {ex.Message}", nameof(EntityCommandBuffer));
+                    var (name, isSerializable, deferred) = _creates[createIndex];
+                    try
+                    {
+                        deferred.Value = new EosEntity(_world, name, true, isSerializable);
+                        deferred.IsResolved = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        EosLog.Error($"Failed to create entity '{name}': {ex.Message}", nameof(EntityCommandBuffer));
+                    }
+                    createIndex++;
+                }
+
+                while (batchIndex < _batches.Count)
+                {
+                    var (entity, ops) = _batches[batchIndex];
+                    RunOps(entity, ops);
+                    batchIndex++;
+                }
+
+                while (deferredBatchIndex < _deferredBatches.Count)
+                {
+                    var (deferred, ops) = _deferredBatches[deferredBatchIndex];
+                    if (deferred.IsResolved)
+                    {
+                        RunOps(deferred.Value, ops);
+                    }
+                    else
+                    {
+                        EosLog.Warning($"Deferred entity in batch is not resolved. Skipping operations.", nameof(EntityCommandBuffer));
+                    }
+                    deferredBatchIndex++;
                 }
             }
 
-            for (int i = 0; i < _batches.Count; i++)
-            {
-                var (entity, ops) = _batches[i];
-                RunOps(entity, ops);
-            }
-
-            for (int i = 0; i < _deferredBatches.Count; i++)
-            {
-                var (deferred, ops) = _deferredBatches[i];
-                if (!deferred.IsResolved) continue;
-                RunOps(deferred.Value, ops);
-            }
-
-            _creates.Clear();
-            _batches.Clear();
-            _deferredBatches.Clear();
+            Clear();
         }
+
         public void Clear()
         {
             _creates.Clear();

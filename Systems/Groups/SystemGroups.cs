@@ -38,8 +38,9 @@ namespace EOS.Systems.Groups
 
         internal void Reset()
         {
-            _enabled.Clear();
-            _parents.Clear();
+            var keys = new List<Type>(_enabled.Keys);
+            for (int i = 0; i < keys.Count; i++)
+                _enabled[keys[i]] = true;
         }
     }
 }

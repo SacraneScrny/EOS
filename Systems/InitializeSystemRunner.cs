@@ -25,26 +25,50 @@ namespace EOS.Systems
                 if (!World.Entities.IsValid(obj.Entity))
                 {
                     EosLog.Warning($"{obj.GetType().Name} has invalid entity, disposing", nameof(InitializeSystemRunner));
-                    obj.Dispose();
+                    Discard(obj);
                     _batch.RemoveAt(i);
                     World.Objects.MarkFailed(obj);
                     continue;
                 }
                 if (!World.Entities.IsActive(obj.Entity)) continue;
 
-                try { obj.Awake(); }
-                catch (Exception ex) { EosLog.Error($"{obj.GetType().Name}.Awake threw: {ex.Message}", nameof(InitializeSystemRunner)); }
+                obj.Awake();
+                if (obj.IsFailed)
+                {
+                    EosLog.Warning($"{obj.GetType().Name} failed to awake, disposing", nameof(InitializeSystemRunner));
+                    Discard(obj);
+                    _batch.RemoveAt(i);
+                    World.Objects.MarkFailed(obj);
+                }
             }
 
             for (int i = _batch.Count - 1; i >= 0; i--)
             {
                 var obj = _batch[i];
                 if (!obj.IsAwaken || obj.IsDisposed) continue;
-                try { obj.Start(); }
-                catch (Exception ex) { EosLog.Error($"{obj.GetType().Name}.Start threw: {ex.Message}", nameof(InitializeSystemRunner)); }
+
+                obj.Start();
+                if (obj.IsFailed)
+                {
+                    EosLog.Warning($"{obj.GetType().Name} failed to start, disposing", nameof(InitializeSystemRunner));
+                    Discard(obj);
+                    World.Objects.MarkFailed(obj);
+                    continue;
+                }
+
                 World.ObjectsStorages.MarkReady(obj);
                 World.Objects.MarkInitialized(obj);
             }
+        }
+
+        void Discard(EosObject obj)
+        {
+            if (!World.ObjectsStorages.RemoveFromStorage(obj))
+                obj.Dispose();
+        }
+        internal void Dispose()
+        {
+            _batch.Clear();
         }
     }
 }

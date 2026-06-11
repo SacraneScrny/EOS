@@ -54,6 +54,7 @@ namespace EOS.CodeGen
                 var invokers = new List<(string key, string lambda)>();
                 var bodies = new List<(string key, string bind)>();
                 var eventBodies = new List<(string key, string bind)>();
+                var shapes = new List<(string key, string hash)>();
 
                 foreach (var method in methods)
                 {
@@ -66,6 +67,7 @@ namespace EOS.CodeGen
                         var bindName = "Bind_" + bindId++;
                         EmitBind(binds, bindName, name, method);
                         bodies.Add((key, bindName));
+                        shapes.Add((key, Literal(SystemShape.ShapeHash(method))));
                     }
                     else if (method.Name == "EventExecute" && CanTypeEvent(method))
                     {
@@ -84,7 +86,8 @@ namespace EOS.CodeGen
                 entries.Append("                () => new ").Append(name).Append("(),\n");
                 AppendDictionary(entries, "global::EOS.CodeGen.SystemInvoker", invokers, ",\n");
                 AppendDictionary(entries, "global::EOS.CodeGen.SystemBodyBinder", bodies, ",\n");
-                AppendDictionary(entries, "global::EOS.CodeGen.EventBodyBinder", eventBodies, "));\n");
+                AppendDictionary(entries, "global::EOS.CodeGen.EventBodyBinder", eventBodies, ",\n");
+                AppendDictionary(entries, "string", shapes, "));\n");
             }
 
             var preserve = new StringBuilder();
@@ -294,6 +297,7 @@ namespace EOS.CodeGen
             {
                 sb.Append("                foreach (var e in world.Entities.All())\n");
                 sb.Append("                {\n");
+                sb.Append("                    if (!e.IsActive) continue;\n");
                 EmitPerEntity(sb, "                    ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition);
                 sb.Append("                }\n");
             }
@@ -361,11 +365,8 @@ namespace EOS.CodeGen
                     if (cp.Optional)
                     {
                         sb.Append(indent).Append(CSharpName(cp.Type)).Append(" c").Append(idx).Append(" = null;\n");
-                        sb.Append(indent).Append("if (k").Append(idx).Append(" >= 0 && ").Append(s).Append(".IsReady(k").Append(idx).Append("))\n");
-                        sb.Append(indent).Append("{\n");
-                        sb.Append(indent).Append("    if (").Append(VerExpr(s, "k" + idx, cp)).Append(" <= cursor) continue;\n");
+                        sb.Append(indent).Append("if (k").Append(idx).Append(" >= 0 && ").Append(s).Append(".IsReady(k").Append(idx).Append(") && ").Append(VerExpr(s, "k" + idx, cp)).Append(" > cursor)\n");
                         sb.Append(indent).Append("    c").Append(idx).Append(" = ").Append(s).Append(".At(k").Append(idx).Append(");\n");
-                        sb.Append(indent).Append("}\n");
                     }
                     else
                     {
@@ -615,35 +616,8 @@ namespace EOS.CodeGen
             return sb.ToString();
         }
 
-        static readonly Dictionary<Type, List<Type>> _implCache = new();
-
         static List<Type> InterfaceImpls(Type iface)
-        {
-            if (_implCache.TryGetValue(iface, out var cached)) return cached;
-
-            var result = new List<Type>();
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                Type[] types;
-                try { types = assembly.GetTypes(); }
-                catch (ReflectionTypeLoadException ex) { types = ex.Types; }
-                catch (Exception) { continue; }
-
-                foreach (var type in types)
-                {
-                    if (type == null) continue;
-                    if (!type.IsClass || type.IsAbstract) continue;
-                    if (type.IsGenericTypeDefinition) continue;
-                    if (!typeof(EosObject).IsAssignableFrom(type)) continue;
-                    if (!iface.IsAssignableFrom(type)) continue;
-                    if (type.GetConstructor(Type.EmptyTypes) == null) continue;
-                    result.Add(type);
-                }
-            }
-            result.Sort((a, b) => string.CompareOrdinal(a.FullName, b.FullName));
-            _implCache[iface] = result;
-            return result;
-        }
+            => new(SystemShape.ImplementationsOf(iface));
 
         static bool InterfacesEnumerable(MethodInfo method)
         {

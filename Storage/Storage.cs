@@ -1,22 +1,29 @@
 using System;
+using System.Collections.Generic;
 using EOS.Core;
 using EOS.Entities;
 using EOS.Logging;
 using EOS.Objects;
+using EOS.Objects.Interfaces;
 
 namespace EOS.Storage
 {
     public class Storage<T> : WorldBound, IStorage, IIndexedStorage
         where T : EosObject, new()
     {
-        T[] _data = new T[1024];
-        int[] _owners = new int[1024];
-        ushort[] _ownerVersions = new ushort[1024];
-        ulong[] _addVersion = new ulong[1024];
-        ulong[] _markVersion = new ulong[1024];
-        ulong[] _markFrame = new ulong[1024];
-        bool[] _ready = new bool[1024];
-        int[] _sparse = new int[1024];
+        const int InitialCapacity = 16;
+
+        static readonly bool Poolable = typeof(IPoolableObject).IsAssignableFrom(typeof(T));
+        readonly Stack<T> _pool = typeof(IPoolableObject).IsAssignableFrom(typeof(T)) ? new Stack<T>() : null;
+
+        T[] _data = new T[InitialCapacity];
+        int[] _owners = new int[InitialCapacity];
+        ushort[] _ownerVersions = new ushort[InitialCapacity];
+        ulong[] _addVersion = new ulong[InitialCapacity];
+        ulong[] _markVersion = new ulong[InitialCapacity];
+        ulong[] _markFrame = new ulong[InitialCapacity];
+        bool[] _ready = new bool[InitialCapacity];
+        int[] _sparse = new int[InitialCapacity];
 
         public int Count { get; private set; }
         public ReadOnlySpan<T> All => _data.AsSpan(0, Count);
@@ -54,7 +61,7 @@ namespace EOS.Storage
             _markFrame[i] = 0;
             _ready[i] = false;
             _sparse[entity.Id] = i;
-            _data[i] = new T();
+            _data[i] = (Poolable && _pool.Count > 0) ? _pool.Pop() : new T();
             _data[i].SetupObject(entity);
 
             World.ObjectsStorages.TrackEntity(entity, this);
@@ -128,6 +135,11 @@ namespace EOS.Storage
             }
 
             toDispose.Dispose();
+            if (Poolable)
+            {
+                toDispose.ResetForReuse();
+                _pool.Push(toDispose);
+            }
             _data[last] = null;
             _owners[last] = 0;
             _ownerVersions[last] = 0;
@@ -162,6 +174,7 @@ namespace EOS.Storage
             Count = 0;
             MaxAddVersion = 0;
             MaxMarkVersion = 0;
+            if (Poolable) _pool.Clear();
         }
 
         public bool IsReady(int index) => _ready[index];

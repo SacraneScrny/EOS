@@ -94,8 +94,25 @@ namespace EOS.Systems
             else
             {
                 var types = AppDomain.CurrentDomain.GetAssemblies()
-                    .SelectMany(a => a.GetTypes())
-                    .Where(t => t.IsSubclassOf(typeof(EosSystem)) && !t.IsAbstract);
+                    .SelectMany(assembly =>
+                    {
+                        try
+                        {
+                            return assembly.GetTypes();
+                        }
+                        catch (ReflectionTypeLoadException ex)
+                        {
+                            EosLog.Error($"Assembly {assembly.GetName().Name} has invalid types, skipping partially loaded", nameof(SystemsRunner));
+                            return ex.Types.Where(t => t != null);
+                        }
+                        catch (Exception ex)
+                        {
+                            EosLog.Error($"Assembly {assembly.GetName().Name} failed to load types: {ex.Message}", nameof(SystemsRunner));
+                            return Enumerable.Empty<Type>();
+                        }
+                    })
+                    .Where(t => t != null && t.IsSubclassOf(typeof(EosSystem)) && !t.IsAbstract)
+                    .ToList();
 
                 foreach (var type in types)
                 {
@@ -185,7 +202,21 @@ namespace EOS.Systems
                     try
                     {
                         var binder = generated?.GetBody(sig);
-                        if (binder != null && SystemShape.CanTypeBody(method))
+                        bool stale = false;
+                        if (binder != null)
+                        {
+                            var expected = generated.GetShapeHash(sig);
+                            if (expected == null)
+                            {
+                                EosLog.Warning($"{type.Name}.{method.Name}: registry has no shape hash, regenerate to enable staleness detection", nameof(SystemsRunner));
+                            }
+                            else if (expected != SystemShape.ShapeHash(method))
+                            {
+                                EosLog.Error($"{type.Name}.{method.Name}: generated registry is stale (system shape changed since generation), falling back to reflection — regenerate", nameof(SystemsRunner));
+                                stale = true;
+                            }
+                        }
+                        if (binder != null && !stale && SystemShape.CanTypeBody(method))
                         {
                             var include = ResolveIndexedStorages(CollectIncludeTypes(method));
                             var exclude = ResolveIndexedStorages(CollectExcludeTypes(method));
@@ -195,7 +226,7 @@ namespace EOS.Systems
                         }
                         else
                         {
-                            if (generated != null)
+                            if (generated != null && !stale)
                                 EosLog.Warning($"{type.Name}.{method.Name}: no generated typed body, falling back to reflection (unsupported shape or stale registry — regenerate)", nameof(SystemsRunner));
                             (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(sig));
                         }
@@ -263,17 +294,16 @@ namespace EOS.Systems
             for (int i = 0; i < systems.Count; i++)
             {
                 var entry = systems[i];
+                ulong now = World.Version;
                 try
                 {
                     if (entry.Reactive)
                     {
-                        ulong now = World.Version;
                         if (entry.IsUpdate())
                         {
                             using (EosProfiler.Sample(entry.Label))
                                 entry.Body(deltaTime, entry.Cursor);
                         }
-                        entry.Cursor = now;
                     }
                     else if (entry.IsUpdate())
                     {
@@ -284,6 +314,10 @@ namespace EOS.Systems
                 catch (Exception ex)
                 {
                     EosLog.Error($"{entry.Type.Name}.Execute threw: {ex.InnerException?.Message ?? ex.Message}", nameof(SystemsRunner));
+                }
+                finally
+                {
+                    entry.Cursor = now;
                 }
             }
         }
@@ -299,5 +333,17 @@ namespace EOS.Systems
 
         public T GetSystem<T>() where T : EosSystem => _typeToSystem.TryGetValue(typeof(T), out var system) ? (T)system : null;
         public IEnumerable<EosSystem> All => _all;
+        
+        internal void Dispose()
+        {
+            _all.Clear();
+            _update.Clear();
+            _fixedUpdate.Clear();
+            _lateUpdate.Clear();
+            _eventUpdate.Clear();
+            _eventFixedUpdate.Clear();
+            _eventLateUpdate.Clear();
+            _typeToSystem.Clear();
+        }
     }
 }

@@ -6,11 +6,10 @@ namespace EOS.Logging
 {
     public static class EosLog
     {
-        private const int BufferSize = 128;
-
-        private static readonly LogEntry[] Buffer = new LogEntry[BufferSize];
-        private static int _head;
-        private static int _totalCount;
+        const int BufferSize = 1024;
+        static readonly LogEntry[] Buffer = new LogEntry[BufferSize];
+        static int _head;
+        static int _totalCount;
 
         public static Action<LogEntry> OnLog = entry => Console.WriteLine(entry.ToString());
 
@@ -41,8 +40,7 @@ namespace EOS.Logging
 
             return sb.ToString();
         }
-
-        private static void Write(LogLevel level, string message, string source)
+        static void Write(LogLevel level, string message, string source)
         {
             var entry = new LogEntry(_totalCount, level, source, message);
             Buffer[_head] = entry;

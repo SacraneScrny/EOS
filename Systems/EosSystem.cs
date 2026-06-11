@@ -21,5 +21,21 @@ namespace EOS.Systems
         public virtual void Awake() { }
         public virtual void Start() { }
         public virtual void OnDebugDraw() { }
+
+        public void On()
+        {
+            if (IsEnabled) return;
+            IsEnabled = true;
+            OnEnable();
+        }
+        protected virtual void OnEnable() { }
+        
+        public void Off()
+        {
+            if (!IsEnabled) return;
+            IsEnabled = false;
+            OnDisable();
+        }
+        public virtual void OnDisable() { }
     }
 }

@@ -2,6 +2,7 @@ using System;
 
 using EOS.Entities;
 using EOS.Events;
+using EOS.Loader;
 using EOS.Logging;
 using EOS.Objects;
 using EOS.Profiling;
@@ -35,14 +36,17 @@ namespace EOS.Core
         SystemGroups SystemGroups { get; }
         InitializeSystemRunner InitializeSystems { get; }
 
-        IReadOnlyEntityCommandBuffer BeforeAll { get; }
-        IReadOnlyEntityCommandBuffer BeforeUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterUpdate { get; }
-        IReadOnlyEntityCommandBuffer BeforeFixedUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterFixedUpdate { get; }
-        IReadOnlyEntityCommandBuffer BeforeLateUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterLateUpdate { get; }
-        IReadOnlyEntityCommandBuffer AfterAll { get; }
+        IEntityCommandScheduler BeforeAll { get; }
+        IEntityCommandScheduler BeforeUpdate { get; }
+        IEntityCommandScheduler AfterUpdate { get; }
+        IEntityCommandScheduler BeforeFixedUpdate { get; }
+        IEntityCommandScheduler AfterFixedUpdate { get; }
+        IEntityCommandScheduler BeforeLateUpdate { get; }
+        IEntityCommandScheduler AfterLateUpdate { get; }
+        IEntityCommandScheduler AfterAll { get; }
+
+        internal void BeginIterationInternal();
+        internal void EndIterationInternal();
     }
 
     public class World : IDisposable, IReadOnlyWorld, IEquatable<World>
@@ -74,6 +78,9 @@ namespace EOS.Core
 
         public StructuralChangePolicy StructuralChangePolicy { get; set; } = StructuralChangePolicy.Throw;
 
+        void IReadOnlyWorld.BeginIterationInternal() => BeginIteration();
+        void IReadOnlyWorld.EndIterationInternal() => EndIteration();
+        
         void BeginIteration() => _iterationDepth++;
         void EndIteration() { if (_iterationDepth > 0) _iterationDepth--; }
 
@@ -120,28 +127,37 @@ namespace EOS.Core
 
         #region ECB
         EntityCommandBuffer _beforeAll;
-        public IReadOnlyEntityCommandBuffer BeforeAll => _beforeAll;
+        public IEntityCommandScheduler BeforeAll => _beforeAll;
 
         EntityCommandBuffer _beforeUpdate;
-        public IReadOnlyEntityCommandBuffer BeforeUpdate => _beforeUpdate;
+        public IEntityCommandScheduler BeforeUpdate => _beforeUpdate;
 
         EntityCommandBuffer _afterUpdate;
-        public IReadOnlyEntityCommandBuffer AfterUpdate => _afterUpdate;
+        public IEntityCommandScheduler AfterUpdate => _afterUpdate;
 
         EntityCommandBuffer _beforeFixedUpdate;
-        public IReadOnlyEntityCommandBuffer BeforeFixedUpdate => _beforeFixedUpdate;
+        public IEntityCommandScheduler BeforeFixedUpdate => _beforeFixedUpdate;
 
         EntityCommandBuffer _afterFixedUpdate;
-        public IReadOnlyEntityCommandBuffer AfterFixedUpdate => _afterFixedUpdate;
+        public IEntityCommandScheduler AfterFixedUpdate => _afterFixedUpdate;
 
         EntityCommandBuffer _beforeLateUpdate;
-        public IReadOnlyEntityCommandBuffer BeforeLateUpdate => _beforeLateUpdate;
+        public IEntityCommandScheduler BeforeLateUpdate => _beforeLateUpdate;
 
         EntityCommandBuffer _afterLateUpdate;
-        public IReadOnlyEntityCommandBuffer AfterLateUpdate => _afterLateUpdate;
+        public IEntityCommandScheduler AfterLateUpdate => _afterLateUpdate;
 
         EntityCommandBuffer _afterAll;
-        public IReadOnlyEntityCommandBuffer AfterAll => _afterAll;
+        public IEntityCommandScheduler AfterAll => _afterAll;
+
+        public UpdateType CurrentPhase { get; private set; } = UpdateType.Update;
+
+        public IEntityCommandScheduler AfterCurrentPhase => CurrentPhase switch
+        {
+            UpdateType.FixedUpdate => _afterFixedUpdate,
+            UpdateType.LateUpdate => _afterLateUpdate,
+            _ => _afterUpdate
+        };
         #endregion
 
         public void Reset()
@@ -164,6 +180,10 @@ namespace EOS.Core
             Objects.Reset();
             Events.Reset();
             _context.Reset();
+            WorldBootstrap.Apply(this);
+            
+            EosLog.Debug($"World {Id}  has been reset.", this.ToString());
+            IsEnabled = true;
         }
         public void Init()
         {
@@ -187,6 +207,7 @@ namespace EOS.Core
             Systems.Init(this);
             _context.Init(this);
             _services.Init(this);
+            WorldBootstrap.Apply(this);
 
             IsEnabled = true;
         }
@@ -195,6 +216,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            CurrentPhase = UpdateType.Update;
             NextFrame();
             using (EosProfiler.Sample("World.Update"))
             {
@@ -222,6 +244,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            CurrentPhase = UpdateType.FixedUpdate;
             NextFrame();
             using (EosProfiler.Sample("World.FixedUpdate"))
             {
@@ -246,6 +269,7 @@ namespace EOS.Core
         {
             if (IsDisposed) return;
             if (!IsEnabled) return;
+            CurrentPhase = UpdateType.LateUpdate;
             NextFrame();
             using (EosProfiler.Sample("World.LateUpdate"))
             {
@@ -284,14 +308,28 @@ namespace EOS.Core
         public void Dispose()
         {
             if (IsDisposed) return;
+            
             IsDisposed = true;
-            ObjectsStorages.Reset();
-            Tags.Reset();
-            Entities.Reset();
-            Objects.Reset();
-            SystemGroups.Reset();
-            _context.Reset();
-            _services.Clear();
+            _beforeAll?.Clear();
+            _beforeUpdate?.Clear();
+            _afterUpdate?.Clear();
+            _beforeFixedUpdate?.Clear();
+            _afterFixedUpdate?.Clear();
+            _beforeLateUpdate?.Clear();
+            _afterLateUpdate?.Clear();
+            _afterAll?.Clear();
+            
+            Events?.Reset();
+            Systems?.Dispose();
+            InitializeSystems?.Dispose();
+            
+            ObjectsStorages?.Reset();
+            Tags?.Reset();
+            Entities?.Reset();
+            Objects?.Reset();
+            SystemGroups?.Reset();
+            _context?.Reset();
+            _services?.Clear();
         }
 
         public bool Equals(World other)

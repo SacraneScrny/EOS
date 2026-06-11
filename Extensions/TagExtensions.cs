@@ -6,9 +6,19 @@ namespace EOS.Extensions
 {
     public static class TagExtensions
     {
+        public static void AddTag(this EosEntity entity, object tag)
+        {
+            if (entity.IsValid) entity.World.Tags.Add(entity, tag);
+        }
+
         public static void AddTag(this EosEntity entity, params object[] tags)
         {
             if (entity.IsValid) entity.World.Tags.Add(entity, tags);
+        }
+
+        public static void RemoveTag(this EosEntity entity, object tag)
+        {
+            if (entity.IsValid) entity.World.Tags.Remove(entity, tag);
         }
 
         public static void RemoveTag(this EosEntity entity, params object[] tags)

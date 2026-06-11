@@ -6,12 +6,11 @@ namespace EOS.Extensions
 {
     public static class EntityExtensions
     {
-        public static T Add<T>(this EosEntity entity) where T : EosObject, new()
-            => entity.World?.ObjectsStorages.Get<T>().Add(entity);
-
-        public static T Get<T>(this EosEntity entity) where T : EosObject, new()
-            => entity.World?.ObjectsStorages.Get<T>().Get(entity);
-
+        public static T Add<T>(this EosEntity entity) where T : EosObject, new() 
+            => entity.IsValid ? entity.World?.ObjectsStorages.Get<T>().Add(entity) : null;
+        public static T Get<T>(this EosEntity entity) where T : EosObject, new() 
+            => entity.IsValid ? entity.World?.ObjectsStorages.Get<T>().Get(entity) : null;
+        
         public static bool TryGet<T>(this EosEntity entity, out T result) where T : EosObject, new()
         {
             result = null;

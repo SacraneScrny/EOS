@@ -80,6 +80,14 @@ namespace EOS.Storage
             }
         }
 
+        internal bool RemoveFromStorage(EosObject obj)
+        {
+            if (obj == null) return false;
+            if (!_map.TryGetValue(obj.GetType(), out var storage)) return false;
+            storage.RemoveEntity(obj.Entity);
+            return true;
+        }
+
         internal void MarkReady(EosObject obj)
         {
             if (_map.TryGetValue(obj.GetType(), out var storage))

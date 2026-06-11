@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using EOS.Core;
 using EOS.Entities;
 using EOS.Extensions;
+using EOS.Logging;
 
 namespace EOS.Objects
 {
@@ -13,6 +14,7 @@ namespace EOS.Objects
         public bool IsAwaken { get; private set; }
         public bool IsStarted { get; private set; }
         public bool IsDisposed { get; private set; }
+        public bool IsFailed { get; private set; }
         public bool HasEntity { get; private set; }
         public bool IsEnabled => IsAwaken && IsStarted && _enabled && Entity.IsActive;
         public bool IsDeserialized { get; internal set; }
@@ -33,19 +35,55 @@ namespace EOS.Objects
             Entity.World.Objects.RegisterObject(this);
         }
 
+        internal void ResetForReuse()
+        {
+            IsAwaken = false;
+            IsStarted = false;
+            IsDisposed = false;
+            IsFailed = false;
+            HasEntity = false;
+            IsDeserialized = false;
+            _enabled = true;
+            Entity = EosEntity.Null;
+            UpdateIndex = -1;
+            FixedIndex = -1;
+            LateIndex = -1;
+            PoolIndex = -1;
+            Initialized = false;
+            _disposables = null;
+        }
+
         internal void Awake()
         {
             if (!HasEntity || IsAwaken) return;
+            try
+            {
+                OnAwake();
+            }
+            catch (Exception e)
+            {
+                EosLog.Error($"Exception in OnAwake of {this}: {e}", nameof(EosObject));
+                IsFailed = true;
+                return;
+            }
             IsAwaken = true;
-            OnAwake();
         }
         protected virtual void OnAwake() { }
 
         internal void Start()
         {
             if (!IsAwaken || IsStarted) return;
+            try
+            {
+                OnStart();
+            }
+            catch (Exception e)
+            {
+                EosLog.Error($"Exception in OnStart of {this}: {e}", nameof(EosObject));
+                IsFailed = true;
+                return;
+            }
             IsStarted = true;
-            OnStart();
         }
         protected virtual void OnStart() { }
 
@@ -73,12 +111,27 @@ namespace EOS.Objects
             if (IsDisposed) return;
             IsDisposed = true;
 
-            if (_disposables != null)
-                foreach (var d in _disposables)
-                    d.Dispose();
+            try 
+            {
+                if (_disposables != null)
+                    foreach (var d in _disposables)
+                        d.Dispose();
+            }
+            catch (Exception e)
+            {
+                EosLog.Error($"Exception while disposing {this}: {e}", nameof(EosObject));
+            }
             _disposables = null;
-
-            OnDispose();
+            
+            try
+            {
+                OnDispose();
+            }
+            catch (Exception e)
+            {
+                EosLog.Error($"Exception in OnDispose of {this}: {e}", nameof(EosObject));
+            }
+            
             Entity.World.Objects.UnregisterObject(this);
         }
         protected virtual void OnDispose() { }

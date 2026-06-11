@@ -12,7 +12,7 @@ namespace EOS.Entities
         public readonly ushort Version;
         internal readonly World World;
 
-        public string Name => World != null ? World.Entities.GetName(Id) : string.Empty;
+        public string Name => World != null ? World.Entities.GetName(this) : string.Empty;
 
         public bool IsValid => World != null && World.Entities.IsValid(this);
         public bool IsActive => World != null && World.Entities.IsActive(this);
@@ -35,8 +35,6 @@ namespace EOS.Entities
         }
 
         public void Destroy() => World.Entities.Destroy(this);
-
-        public static implicit operator int(EosEntity entity) => entity.Id;
 
         public static bool operator ==(EosEntity a, EosEntity b) => a.Id == b.Id && a.Version == b.Version && (a.World?.Id ?? -1) == (b.World?.Id ?? -1);
         public static bool operator !=(EosEntity a, EosEntity b) => !(a == b);
