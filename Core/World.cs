@@ -2,6 +2,7 @@ using System;
 
 using EOS.Entities;
 using EOS.Events;
+using EOS.Hierarchy;
 using EOS.Loader;
 using EOS.Logging;
 using EOS.Objects;
@@ -32,6 +33,7 @@ namespace EOS.Core
         SystemsRunner Systems { get; }
 
         TagsContainer Tags { get; }
+        HierarchyContainer Hierarchy { get; }
         ObjectsStorageMap ObjectsStorages { get; }
         SystemGroups SystemGroups { get; }
         InitializeSystemRunner InitializeSystems { get; }
@@ -110,6 +112,7 @@ namespace EOS.Core
         public SystemsRunner Systems { get; } = new();
 
         public TagsContainer Tags { get; } = new();
+        public HierarchyContainer Hierarchy { get; } = new();
         public ObjectsStorageMap ObjectsStorages { get; } = new();
         public SystemGroups SystemGroups { get; } = new();
         public InitializeSystemRunner InitializeSystems { get; } = new();
@@ -175,6 +178,7 @@ namespace EOS.Core
 
             ObjectsStorages.Reset();
             Tags.Reset();
+            Hierarchy.Reset();
             SystemGroups.Reset();
             Entities.Reset();
             Objects.Reset();
@@ -199,6 +203,7 @@ namespace EOS.Core
 
             ObjectsStorages.Init(this);
             Tags.Init(this);
+            Hierarchy.Init(this);
             SystemGroups.Init(this);
             InitializeSystems.Init(this);
             Objects.Init(this);
@@ -325,6 +330,7 @@ namespace EOS.Core
             
             ObjectsStorages?.Reset();
             Tags?.Reset();
+            Hierarchy?.Reset();
             Entities?.Reset();
             Objects?.Reset();
             SystemGroups?.Reset();

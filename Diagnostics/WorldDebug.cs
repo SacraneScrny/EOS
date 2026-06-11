@@ -84,12 +84,31 @@ namespace EOS.Diagnostics
                 return;
             }
 
-            sb.Append(entity.IsActive ? " [active]" : " [inactive]");
+            sb.Append(entity.IsActiveSelf ? " [active]" : " [inactive]");
+            if (entity.IsActiveSelf && !entity.IsActive) sb.Append(" [inactive in hierarchy]");
             if (!entity.IsValid) sb.Append(" [stale]");
 
             var key = world.Entities.GetStableKey(entity);
             if (!string.IsNullOrEmpty(key)) sb.Append(" key=").Append(key);
             sb.AppendLine();
+
+            var parent = world.Hierarchy.GetParent(entity);
+            if (parent.IsValid)
+                sb.Append("  parent: #").Append(parent.Id)
+                  .Append(" '").Append(parent.Name).Append('\'').AppendLine();
+
+            if (world.Hierarchy.GetChildCount(entity) > 0)
+            {
+                sb.Append("  children: ");
+                bool anyChild = false;
+                foreach (var child in world.Hierarchy.ChildrenOf(entity))
+                {
+                    if (anyChild) sb.Append(", ");
+                    sb.Append('#').Append(child.Id).Append(" '").Append(child.Name).Append('\'');
+                    anyChild = true;
+                }
+                sb.AppendLine();
+            }
 
             sb.Append("  components: ");
             bool anyComponent = false;

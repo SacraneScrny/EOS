@@ -36,6 +36,13 @@ namespace EOS.Systems.CommandBuffer
         public BoundSchedule Destroy()
             => Wrap(_chain.Destroy());
 
+        public BoundSchedule SetParent(EosEntity parent)
+            => Wrap(_chain.SetParent(parent));
+        public BoundSchedule SetParent(DeferredEntity parent)
+            => Wrap(_chain.SetParent(parent));
+        public BoundSchedule Detach()
+            => Wrap(_chain.Detach());
+
         public BoundSchedule WhenTag(params object[] tags)
             => Wrap(_chain.WhenTag(tags));
         public BoundSchedule WhenNoTag(params object[] tags)

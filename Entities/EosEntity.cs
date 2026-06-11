@@ -16,6 +16,7 @@ namespace EOS.Entities
 
         public bool IsValid => World != null && World.Entities.IsValid(this);
         public bool IsActive => World != null && World.Entities.IsActive(this);
+        public bool IsActiveSelf => World != null && World.Entities.IsActiveSelf(this);
 
         public EosEntity(World world, string name = "", bool active = false, bool isSerializable = true)
         {

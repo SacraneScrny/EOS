@@ -46,9 +46,13 @@ namespace EOS.Serialization
                 {
                     LocalId = entity.Id,
                     Name = entity.Name,
-                    Active = entity.IsActive,
+                    Active = world.Entities.IsActiveSelf(entity),
                     StableKey = world.Entities.GetStableKey(entity)
                 };
+
+                var parent = world.Hierarchy.GetParent(entity);
+                if (parent.IsValid && world.Entities.IsSerializable(parent))
+                    record.ParentLocalId = parent.Id;
 
                 world.Tags.CollectDescriptors(entity, descriptors);
                 for (int i = 0; i < descriptors.Count; i++)
@@ -133,6 +137,14 @@ namespace EOS.Serialization
                 if (!string.IsNullOrEmpty(record.StableKey))
                     world.Entities.SetStableKey(entity, record.StableKey);
                 RestoreTags(world, entity, record.Tags);
+            }
+
+            foreach (var record in ws.Entities)
+            {
+                if (record.ParentLocalId < 0) continue;
+                if (!mapper.TryGetValue(record.LocalId, out var child)) continue;
+                if (!mapper.TryGetValue(record.ParentLocalId, out var parent)) continue;
+                world.Hierarchy.SetParent(child, parent);
             }
 
             var ctx = new RestoreContext(mapper, world);
