@@ -5,6 +5,7 @@ using System.Text;
 
 namespace EOS.Profiling
 {
+    /// <summary>Profiler backend that accumulates elapsed ticks and call counts per label and formats a sorted report via <see cref="Dump"/>.</summary>
     public sealed class AggregatedProfilerBackend : IEosProfilerBackend
     {
         readonly struct Frame
@@ -23,8 +24,10 @@ namespace EOS.Profiling
         readonly Dictionary<string, long> _ticks = new();
         readonly Dictionary<string, int> _calls = new();
 
+        /// <summary>Begins timing a span with the given label.</summary>
         public void Begin(string label) => _stack.Push(new Frame(label, Stopwatch.GetTimestamp()));
 
+        /// <summary>Ends the current span and accumulates its elapsed time and call count.</summary>
         public void End()
         {
             if (_stack.Count == 0) return;
@@ -36,6 +39,7 @@ namespace EOS.Profiling
             _calls[frame.Label] = count + 1;
         }
 
+        /// <summary>Clears all accumulated timings, counts, and the open-span stack.</summary>
         public void Reset()
         {
             _stack.Clear();
@@ -43,6 +47,7 @@ namespace EOS.Profiling
             _calls.Clear();
         }
 
+        /// <summary>Returns a report of total/avg milliseconds and call counts per label sorted by total time, optionally resetting afterward.</summary>
         public string Dump(bool reset = true)
         {
             if (_ticks.Count == 0)

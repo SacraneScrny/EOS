@@ -8,6 +8,7 @@ using EOS.Storage;
 
 namespace EOS.Queries
 {
+    /// <summary>Immutable, allocation-free query over entities carrying both components; pivots on the smaller storage and yields <see cref="QueryResult{T1, T2}"/>.</summary>
     public readonly struct EntityQuery<T1, T2>
         where T1 : EosObject, new()
         where T2 : EosObject, new()
@@ -33,32 +34,41 @@ namespace EOS.Queries
             _filter = filter;
         }
 
+        /// <summary>Returns a new query that also requires the entity to carry a ready <typeparamref name="TInclude"/>.</summary>
         public EntityQuery<T1, T2> With<TInclude>() where TInclude : EosObject, new()
             => new(_world, _s1, _s2, _filter.With(_world.ObjectsStorages.Get<TInclude>()));
 
+        /// <summary>Returns a new query that excludes entities carrying a ready <typeparamref name="TExclude"/>.</summary>
         public EntityQuery<T1, T2> Without<TExclude>() where TExclude : EosObject, new()
             => new(_world, _s1, _s2, _filter.Without(_world.ObjectsStorages.Get<TExclude>()));
 
+        /// <summary>Returns a new query requiring all of the given tags (strings or enum values).</summary>
         public EntityQuery<T1, T2> WithTag(params object[] tags)
             => new(_world, _s1, _s2, _filter.Require(_world.Tags, _world.Tags.BuildMask(tags)));
 
+        /// <summary>Returns a new query excluding entities that carry any of the given tags.</summary>
         public EntityQuery<T1, T2> WithoutTag(params object[] tags)
             => new(_world, _s1, _s2, _filter.Forbid(_world.Tags, _world.Tags.BuildMask(tags)));
 
+        /// <summary>Returns a new query requiring at least one of the given tags.</summary>
         public EntityQuery<T1, T2> WithAnyTag(params object[] tags)
             => new(_world, _s1, _s2, _filter.Any(_world.Tags, _world.Tags.BuildMask(tags)));
 
+        /// <summary>Returns a new query requiring exactly one of the given tags.</summary>
         public EntityQuery<T1, T2> WithOneTag(params object[] tags)
             => new(_world, _s1, _s2, _filter.One(_world.Tags, _world.Tags.BuildMask(tags)));
 
+        /// <summary>Returns the allocation-free struct enumerator; supports <c>foreach</c>.</summary>
         public Enumerator GetEnumerator() => new(_world, _s1, _s2, _filter);
 
+        /// <summary>True if at least one entity matches the query.</summary>
         public bool Any()
         {
             using var e = GetEnumerator();
             return e.MoveNext();
         }
 
+        /// <summary>Counts the matching entities by enumerating.</summary>
         public int Count()
         {
             int n = 0;
@@ -67,6 +77,7 @@ namespace EOS.Queries
             return n;
         }
 
+        /// <summary>Gets the first matching result; returns false (and <c>default</c>) if none match.</summary>
         public bool TryFirst(out QueryResult<T1, T2> result)
         {
             using var e = GetEnumerator();
@@ -79,6 +90,7 @@ namespace EOS.Queries
             return false;
         }
 
+        /// <summary>Invokes <paramref name="action"/> with both components for each matching entity.</summary>
         public void ForEach(Action<T1, T2> action)
         {
             if (action == null) return;
@@ -90,6 +102,7 @@ namespace EOS.Queries
             }
         }
 
+        /// <summary>Invokes <paramref name="action"/> with the entity and both components for each match.</summary>
         public void ForEach(Action<EosEntity, T1, T2> action)
         {
             if (action == null) return;
@@ -101,6 +114,7 @@ namespace EOS.Queries
             }
         }
 
+        /// <summary>Materializes all matching results into a new list.</summary>
         public List<QueryResult<T1, T2>> ToList()
         {
             var list = new List<QueryResult<T1, T2>>();
@@ -109,6 +123,7 @@ namespace EOS.Queries
             return list;
         }
 
+        /// <summary>Allocation-free enumerator that guards the world iteration scope; dispose to release it (handled by <c>foreach</c>).</summary>
         public struct Enumerator : IDisposable
         {
             readonly IReadOnlyWorld _world;
@@ -138,8 +153,10 @@ namespace EOS.Queries
                 _world.BeginIterationInternal();
             }
 
+            /// <summary>The current matching result.</summary>
             public QueryResult<T1, T2> Current => _current;
 
+            /// <summary>Advances to the next entity carrying both ready components and matching the filter; false when exhausted.</summary>
             public bool MoveNext()
             {
                 if (_isDisposed) throw new ObjectDisposedException(nameof(Enumerator));

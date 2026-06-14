@@ -5,6 +5,7 @@ using EOS.Core;
 
 namespace EOS.Systems.Groups
 {
+    /// <summary>Per-world registry of <see cref="SystemGroup"/> enable state with hierarchical (ancestor-aware) resolution.</summary>
     public class SystemGroups : WorldBound
     {
         readonly Dictionary<Type, bool> _enabled = new();
@@ -24,10 +25,14 @@ namespace EOS.Systems.Groups
             }
         }
 
+        /// <summary>Sets the own enabled flag for a group type (does not affect ancestors).</summary>
         public void SetEnabled(Type groupType, bool enabled) => _enabled[groupType] = enabled;
+        /// <summary>Enables group <typeparamref name="T"/>.</summary>
         public void Enable<T>() where T : SystemGroup => SetEnabled(typeof(T), true);
+        /// <summary>Disables group <typeparamref name="T"/>, suspending its systems and descendants.</summary>
         public void Disable<T>() where T : SystemGroup => SetEnabled(typeof(T), false);
 
+        /// <summary>True only if the group and every ancestor group is enabled; unknown groups count as enabled.</summary>
         public bool IsEnabled(Type groupType)
         {
             if (!_enabled.TryGetValue(groupType, out bool enabled)) return true;

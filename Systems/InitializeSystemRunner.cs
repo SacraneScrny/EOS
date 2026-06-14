@@ -8,9 +8,11 @@ using EOS.Objects;
 
 namespace EOS.Systems
 {
+    /// <summary>Runs <c>Awake</c> then <c>Start</c> on waiting components of valid, active entities before systems each <c>Update</c>, then marks them ready.</summary>
     public class InitializeSystemRunner : WorldBound
     {
         readonly List<EosObject> _batch = new();
+        /// <summary>The objects processed in the most recent run.</summary>
         public IReadOnlyList<EosObject> Batch => _batch;
 
         internal void Run()

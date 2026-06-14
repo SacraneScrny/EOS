@@ -9,8 +9,10 @@ using EOS.Systems;
 
 namespace EOS.CodeGen
 {
+    /// <summary>Generated reflection-style invoker that calls a system method with a boxed argument array.</summary>
     public delegate void SystemInvoker(EosSystem system, object[] args);
 
+    /// <summary>Generated factory that binds a system's <c>Execute</c> body against its storages and filters, returning a per-frame <c>(deltaTime, cursor)</c> runner.</summary>
     public delegate Action<float, ulong> SystemBodyBinder(
         EosSystem system,
         World world,
@@ -18,12 +20,17 @@ namespace EOS.CodeGen
         IIndexedStorage[] exclude,
         Func<EosEntity, bool> tagMatch);
 
+    /// <summary>A bound <c>EventExecute</c> body together with its event channel and consumer slot.</summary>
     public readonly struct EventBinding
     {
+        /// <summary>Per-frame body that drains unread events from the channel.</summary>
         public readonly Action<float> Body;
+        /// <summary>The event channel this binding consumes.</summary>
         public readonly IEventChannel Channel;
+        /// <summary>The consumer slot identifying this binding's read cursor on the channel.</summary>
         public readonly int Slot;
 
+        /// <summary>Constructs an event binding from its body, channel and consumer slot.</summary>
         public EventBinding(Action<float> body, IEventChannel channel, int slot)
         {
             Body = body;

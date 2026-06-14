@@ -11,14 +11,17 @@ using EOS.Tags;
 
 namespace EOS.Serialization
 {
+    /// <summary>Captures and restores every serializable world to/from a <see cref="UniverseSnapshot"/> of plain records; restore is two-pass so cross-entity references resolve regardless of record order.</summary>
     public static class WorldSerializer
     {
+        /// <summary>Convenience that calls <see cref="Capture"/> and hands the result to <see cref="WorldLoader.OnSave"/> (no-op if no saver is set).</summary>
         public static void Save()
         {
             if (WorldLoader.OnSave == null) return;
             WorldLoader.OnSave(Capture());
         }
 
+        /// <summary>Walks every serializable, non-disposed world (default first) into a fresh <see cref="UniverseSnapshot"/>.</summary>
         public static UniverseSnapshot Capture()
         {
             var snapshot = new UniverseSnapshot();
@@ -104,6 +107,7 @@ namespace EOS.Serialization
             return ws;
         }
 
+        /// <summary>Restores a snapshot into the matching worlds (by key; empty key is the default world, missing keys are created), resetting each before reapplying its entities, components, tags and context.</summary>
         public static void Restore(UniverseSnapshot snapshot)
         {
             if (snapshot?.Worlds == null) return;

@@ -8,7 +8,7 @@ Pure C# class library — no `.csproj`, no solution file, no test runner. There 
 
 ## Code style
 
-- No comments of any kind.
+- No comments except XML doc `<summary>` on the public API. Every public type and member (and the `protected` virtual/abstract override surface of public base classes) carries a brief `<summary>` — one or two lines — saying what it is and how to use it correctly, so the surface is self-documenting and you needn't reach for the README. `<see cref="..."/>` / `<c>...</c>` inline tags are allowed inside it. **No** inline `//`, block comments, or trailing comments anywhere, and nothing beyond `<summary>` on non-public members.
 - No aligning tabs. Only standard indentation (4 spaces).
 - All error handling via `try/catch` + `EosLog.Error/Warning` — never swallow silently. Invalid operations (boot-less updates, mid-iteration registration) log an error and bail rather than throwing, except the structural-change guard which throws by policy.
 - Always pass `nameof(TheClass)` as the `source` argument to `EosLog` calls.

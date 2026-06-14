@@ -8,6 +8,7 @@ using EOS.Objects.Interfaces;
 
 namespace EOS.Storage
 {
+    /// <summary>Dense-array sparse-set storage for one component type <typeparamref name="T"/>; iterated linearly by systems and queries. Opt into instance pooling by marking <typeparamref name="T"/> with <see cref="EOS.Objects.Interfaces.IPoolableObject"/>.</summary>
     public class Storage<T> : WorldBound, IStorage, IIndexedStorage
         where T : EosObject, new()
     {
@@ -25,14 +26,21 @@ namespace EOS.Storage
         bool[] _ready = new bool[InitialCapacity];
         int[] _sparse = new int[InitialCapacity];
 
+        /// <summary>Number of components currently stored.</summary>
         public int Count { get; private set; }
+        /// <summary>The contiguous dense span of components for linear iteration.</summary>
         public ReadOnlySpan<T> All => _data.AsSpan(0, Count);
 
+        /// <summary>Monotonic high-water mark of add-versions, used to early-out <c>[New]</c> reactive scans.</summary>
         public ulong MaxAddVersion { get; private set; }
+        /// <summary>Monotonic high-water mark of mark-versions, used to early-out <c>[Bumped]</c> reactive scans.</summary>
         public ulong MaxMarkVersion { get; private set; }
+        /// <summary>The add-version stamped at the given dense index.</summary>
         public ulong AddVersionAt(int index) => _addVersion[index];
+        /// <summary>The mark-version stamped at the given dense index.</summary>
         public ulong MarkVersionAt(int index) => _markVersion[index];
 
+        /// <summary>The dense index of the entity's component, or -1 if absent.</summary>
         public int IndexOf(EosEntity entity)
         {
             int id = entity.Id;
@@ -43,6 +51,7 @@ namespace EOS.Storage
             return -1;
         }
 
+        /// <summary>Adds a component for the entity (returning the existing one if present), rents from the pool when poolable. Guarded against mid-iteration structural changes.</summary>
         public T Add(EosEntity entity)
         {
             int existing = IndexOf(entity);
@@ -68,6 +77,7 @@ namespace EOS.Storage
             return _data[i];
         }
 
+        /// <summary>Returns the entity's component; logs an error and returns null if the entity has no component here.</summary>
         public T Get(EosEntity entity)
         {
             try
@@ -82,6 +92,7 @@ namespace EOS.Storage
                 return null;
             }
         }
+        /// <summary>Tries to get the entity's component, regardless of ready state.</summary>
         public bool TryGet(EosEntity entity, out T result)
         {
             int i = IndexOf(entity);
@@ -93,13 +104,17 @@ namespace EOS.Storage
             result = null;
             return false;
         }
+        /// <summary>The component at the given dense index.</summary>
         public T At(int index) => _data[index];
+        /// <summary>Whether the entity has a component in this storage.</summary>
         public bool Has(EosEntity entity) => IndexOf(entity) >= 0;
+        /// <summary>Whether the entity has a ready (awoken, started, enabled) component in this storage.</summary>
         public bool HasReady(EosEntity entity)
         {
             int i = IndexOf(entity);
             return i >= 0 && IsReady(i);
         }
+        /// <summary>Tries to get the entity's component only if it is ready.</summary>
         public bool TryGetReady(EosEntity entity, out T result)
         {
             int i = IndexOf(entity);
@@ -111,9 +126,11 @@ namespace EOS.Storage
             result = null;
             return false;
         }
+        /// <summary>The entity owning the component at the given dense index.</summary>
         public EosEntity GetOwner(int index) =>
             new(_owners[index], _ownerVersions[index], World);
 
+        /// <summary>Removes and disposes the entity's component (returning it to the pool if poolable). Guarded against mid-iteration structural changes.</summary>
         public bool Remove(EosEntity entity)
         {
             int i = IndexOf(entity);
@@ -152,9 +169,11 @@ namespace EOS.Storage
             return true;
         }
 
+        /// <summary>Removes the entity's component, if present (non-generic <see cref="IStorage"/> entry point).</summary>
         public void RemoveEntity(EosEntity entity) => Remove(entity);
         EosObject IStorage.AddObject(EosEntity entity) => Add(entity);
 
+        /// <summary>Disposes every component, resets the dense arrays and watermarks, and drains the pool.</summary>
         public void Clear()
         {
             int count = Count;
@@ -177,8 +196,10 @@ namespace EOS.Storage
             if (Poolable) _pool.Clear();
         }
 
+        /// <summary>Whether the component at the given dense index is ready (awoken, started, enabled).</summary>
         public bool IsReady(int index) => _ready[index];
 
+        /// <summary>Recomputes the ready flag for the entity's component after an enabled/active change.</summary>
         public void RefreshReady(EosEntity entity)
         {
             int i = IndexOf(entity);
@@ -186,6 +207,7 @@ namespace EOS.Storage
             _ready[i] = _data[i] != null && _data[i].IsEnabled;
         }
 
+        /// <summary>Stamps the add-version for the entity's component, signalling the <c>[New]</c> channel, and refreshes readiness.</summary>
         public void MarkReady(EosEntity entity)
         {
             int i = IndexOf(entity);
@@ -195,6 +217,7 @@ namespace EOS.Storage
             _ready[i] = _data[i] != null && _data[i].IsEnabled;
         }
 
+        /// <summary>Stamps the mark-version for the entity's component, signalling the <c>[Bumped]</c> channel (deduped to once per frame).</summary>
         public void Bump(EosEntity entity)
         {
             int i = IndexOf(entity);

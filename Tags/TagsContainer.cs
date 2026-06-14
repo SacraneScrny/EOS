@@ -7,6 +7,7 @@ using EOS.Logging;
 
 namespace EOS.Tags
 {
+    /// <summary>Per-world per-entity tag bitmask store; tags are strings or enum values interned to bit indices, queried via <c>Has*</c>/<c>Match*</c> and precompiled masks.</summary>
     public sealed class TagsContainer : WorldBound
     {
         readonly TagRegistry _registry = new();
@@ -16,8 +17,10 @@ namespace EOS.Tags
         int _entityCapacity = 1024;
         int _words = 1;
 
+        /// <summary>The interner mapping tag keys to bit indices for this container.</summary>
         public TagRegistry Registry => _registry;
 
+        /// <summary>Adds a single tag (string or enum value; <c>[Flags]</c> enums expand per set flag) to the entity.</summary>
         public void Add(EosEntity entity, object tag)
         {
             int id = entity.Id;
@@ -29,6 +32,7 @@ namespace EOS.Tags
             AddScratchBits(id);
         }
 
+        /// <summary>Adds multiple tags to the entity.</summary>
         public void Add(EosEntity entity, params object[] tags)
         {
             int id = entity.Id;
@@ -40,6 +44,7 @@ namespace EOS.Tags
             AddScratchBits(id);
         }
 
+        /// <summary>Removes a single tag from the entity.</summary>
         public void Remove(EosEntity entity, object tag)
         {
             int id = entity.Id;
@@ -51,6 +56,7 @@ namespace EOS.Tags
             RemoveScratchBits(id);
         }
 
+        /// <summary>Removes multiple tags from the entity.</summary>
         public void Remove(EosEntity entity, params object[] tags)
         {
             int id = entity.Id;
@@ -85,6 +91,7 @@ namespace EOS.Tags
             }
         }
 
+        /// <summary>Returns true if the entity carries the given tag (all bits, for a <c>[Flags]</c> value).</summary>
         public bool Has(EosEntity entity, object tag)
         {
             if (!entity.IsValid) return false;
@@ -94,15 +101,19 @@ namespace EOS.Tags
             return mask != null && MatchAll(entity, mask);
         }
 
+        /// <summary>Returns true if the entity carries all the given tags.</summary>
         public bool HasAll(EosEntity entity, params object[] tags)
             => MatchAll(entity, ScratchMask(tags));
 
+        /// <summary>Returns true if the entity carries at least one of the given tags.</summary>
         public bool HasAny(EosEntity entity, params object[] tags)
             => MatchAny(entity, ScratchMask(tags));
 
+        /// <summary>Returns true if the entity carries exactly one of the given tags.</summary>
         public bool HasOne(EosEntity entity, params object[] tags)
             => MatchOne(entity, ScratchMask(tags));
 
+        /// <summary>Returns true if the entity carries any tag drawn from the given enum type (cached per type).</summary>
         public bool HasAnyIn(EosEntity entity, Type enumType)
         {
             if (enumType == null || !enumType.IsEnum) return false;
@@ -123,6 +134,7 @@ namespace EOS.Tags
             return MatchAny(entity, mask);
         }
 
+        /// <summary>Clears all tags from the entity.</summary>
         public void ClearEntity(EosEntity entity)
         {
             int id = entity.Id;
@@ -132,6 +144,7 @@ namespace EOS.Tags
             for (int w = 0; w < _words; w++) _bits[b + w] = 0;
         }
 
+        /// <summary>Fills <paramref name="into"/> with the display names of the tags set on the entity.</summary>
         public void GetTagNames(EosEntity entity, List<string> into)
         {
             if (into == null) return;
@@ -169,6 +182,7 @@ namespace EOS.Tags
             }
         }
 
+        /// <summary>Builds a reusable bit mask from the given tags for fast repeated matching; null if empty.</summary>
         public ulong[] BuildMask(IEnumerable<object> tags)
         {
             if (tags == null) return null;
@@ -177,6 +191,7 @@ namespace EOS.Tags
             return MaskFromScratch();
         }
 
+        /// <summary>Returns true if the entity has every bit in the mask (a null mask matches).</summary>
         public bool MatchAll(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return true;
@@ -189,6 +204,7 @@ namespace EOS.Tags
             return true;
         }
 
+        /// <summary>Returns true if the entity has none of the bits in the mask (a null mask matches).</summary>
         public bool MatchNone(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return true;
@@ -201,6 +217,7 @@ namespace EOS.Tags
             return true;
         }
 
+        /// <summary>Returns true if the entity has at least one bit in the mask (a null mask never matches).</summary>
         public bool MatchAny(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return false;
@@ -213,6 +230,7 @@ namespace EOS.Tags
             return false;
         }
 
+        /// <summary>Returns true if the entity has exactly one bit in the mask (a null mask never matches).</summary>
         public bool MatchOne(EosEntity entity, ulong[] mask)
         {
             if (mask == null) return false;

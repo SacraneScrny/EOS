@@ -6,6 +6,7 @@ using EOS.Objects;
 
 namespace EOS.Storage
 {
+    /// <summary>Per-world registry of <see cref="Storage{T}"/> instances, indexed by concrete type, by implemented interface, and per owning entity; lazily creates storages on demand.</summary>
     public class ObjectsStorageMap : WorldBound
     {
         readonly Dictionary<Type, IStorage> _map = new();
@@ -13,11 +14,14 @@ namespace EOS.Storage
         List<IStorage>[] _entityStorages = new List<IStorage>[1024];
         readonly Stack<List<IStorage>> _listPool = new();
 
+        /// <summary>All concrete storages keyed by component type.</summary>
         public IReadOnlyDictionary<Type, IStorage> AllStorages => _map;
 
+        /// <summary>Gets (creating on first use) the typed storage for component type <typeparamref name="T"/>.</summary>
         public Storage<T> Get<T>() where T : EosObject, new()
             => (Storage<T>)GetOrCreate(typeof(T));
 
+        /// <summary>Gets or lazily creates the storage for a concrete <see cref="EosObject"/> type; throws if the type is null, abstract, or not an <see cref="EosObject"/>.</summary>
         public IStorage GetOrCreate(Type type)
         {
             if (type != null && _map.TryGetValue(type, out var existing))
@@ -42,11 +46,13 @@ namespace EOS.Storage
 
             return created;
         }
+        /// <summary>Returns the already-created storage for the concrete type, or null if none exists (does not create).</summary>
         public IStorage GetConcrete(Type type)
         {
             _map.TryGetValue(type, out var storage);
             return storage;
         }
+        /// <summary>Returns all storages whose component type implements the given interface, or null if none, for interface-driven queries.</summary>
         public IReadOnlyList<IStorage> GetByInterface(Type interfaceType)
         {
             _byInterface.TryGetValue(interfaceType, out var result);

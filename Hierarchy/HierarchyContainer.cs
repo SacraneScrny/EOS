@@ -7,6 +7,7 @@ using EOS.Logging;
 
 namespace EOS.Hierarchy
 {
+    /// <summary>Per-world parent-child graph stored as sparse intrusive linked lists; reads are alloc-free and O(1). Use via <see cref="EOS.Extensions.HierarchyExtensions"/>.</summary>
     public sealed class HierarchyContainer : WorldBound
     {
         int[] _parents;
@@ -33,6 +34,7 @@ namespace EOS.Hierarchy
             ClearSlots(0, _capacity);
         }
 
+        /// <summary>Reparents <paramref name="child"/> under <paramref name="parent"/> (null parent detaches); rejects cycles, self-parenting, cross-world and stale handles with an error log, and emits <see cref="ParentChanged"/>.</summary>
         public bool SetParent(EosEntity child, EosEntity parent)
         {
             if (child.World != World || !child.IsValid)
@@ -75,6 +77,7 @@ namespace EOS.Hierarchy
             return true;
         }
 
+        /// <summary>Returns the entity's parent, or <see cref="EosEntity.Null"/> if it is a root or invalid.</summary>
         public EosEntity GetParent(EosEntity entity)
         {
             if (entity.World != World || !entity.IsValid) return EosEntity.Null;
@@ -82,9 +85,11 @@ namespace EOS.Hierarchy
             return id < _capacity ? ParentOf(id) : EosEntity.Null;
         }
 
+        /// <summary>True when the entity has a parent.</summary>
         public bool HasParent(EosEntity entity)
             => entity.World == World && entity.IsValid && entity.Id < _capacity && _parents[entity.Id] >= 0;
 
+        /// <summary>Returns the entity's subtree root (itself if it is a root) via a cached O(1) lookup.</summary>
         public EosEntity GetRoot(EosEntity entity)
         {
             if (entity.World != World || !entity.IsValid) return EosEntity.Null;
@@ -93,6 +98,7 @@ namespace EOS.Hierarchy
             return World.Entities.EntityFromId(_root[id]);
         }
 
+        /// <summary>True when <paramref name="ancestor"/> appears anywhere above <paramref name="entity"/> in the hierarchy.</summary>
         public bool IsDescendantOf(EosEntity entity, EosEntity ancestor)
         {
             if (entity.World != World || ancestor.World != World) return false;
@@ -107,14 +113,17 @@ namespace EOS.Hierarchy
             return false;
         }
 
+        /// <summary>Number of direct children of the entity.</summary>
         public int GetChildCount(EosEntity entity)
             => entity.World == World && entity.IsValid && entity.Id < _capacity ? _childCount[entity.Id] : 0;
 
+        /// <summary>Returns an alloc-free struct enumerator over the entity's direct children (order unspecified).</summary>
         public ChildList ChildrenOf(EosEntity entity)
             => entity.World == World && entity.IsValid && entity.Id < _capacity
                 ? new ChildList(this, _firstChild[entity.Id])
                 : new ChildList(this, -1);
 
+        /// <summary>Appends the entity's children into <paramref name="into"/> (BFS when <paramref name="recursive"/>); returns the number added.</summary>
         public int Collect(EosEntity entity, List<EosEntity> into, bool recursive = false)
         {
             if (into == null) return 0;
@@ -134,6 +143,7 @@ namespace EOS.Hierarchy
             return into.Count - before;
         }
 
+        /// <summary>Detaches all direct children of the entity, making each a root.</summary>
         public void DetachChildren(EosEntity entity)
         {
             if (entity.World != World || !entity.IsValid || entity.Id >= _capacity) return;
@@ -313,6 +323,7 @@ namespace EOS.Hierarchy
             }
         }
 
+        /// <summary>Alloc-free <c>foreach</c>-able view over an entity's direct children.</summary>
         public readonly struct ChildList
         {
             readonly HierarchyContainer _hierarchy;
@@ -324,8 +335,10 @@ namespace EOS.Hierarchy
                 _first = first;
             }
 
+            /// <summary>Returns the struct enumerator over the children.</summary>
             public Enumerator GetEnumerator() => new(_hierarchy, _hierarchy == null ? -1 : _first);
 
+            /// <summary>Forward-only struct enumerator walking the sibling linked list.</summary>
             public struct Enumerator
             {
                 readonly HierarchyContainer _hierarchy;
@@ -339,8 +352,10 @@ namespace EOS.Hierarchy
                     _current = -1;
                 }
 
+                /// <summary>The child entity at the current position.</summary>
                 public EosEntity Current => _hierarchy.World.Entities.EntityFromId(_current);
 
+                /// <summary>Advances to the next child; returns false when exhausted.</summary>
                 public bool MoveNext()
                 {
                     if (_next < 0) return false;

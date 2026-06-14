@@ -7,6 +7,7 @@ using EOS.Objects.Interfaces;
 
 namespace EOS.Objects
 {
+    /// <summary>Per-world registry of components, tracking the per-phase update lists and the waiting/inited pools that drive per-object updates and debug draw.</summary>
     public class ObjectsContainer : WorldBound
     {
         readonly List<IObjectUpdate> _updates = new();
@@ -15,6 +16,7 @@ namespace EOS.Objects
         readonly List<EosObject> _inited = new();
         readonly List<EosObject> _waiting = new();
 
+        /// <summary>All initialized (awoken and started) components in this world.</summary>
         public IEnumerable<EosObject> All => _inited;
         internal IEnumerable<EosObject> Waiting => _waiting;
 

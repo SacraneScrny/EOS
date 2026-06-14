@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace EOS.Events
 {
+    /// <summary>Per-type one-frame event buffer: staged events promote to a live ring read once per registered consumer cursor, then retire by min-cursor or age.</summary>
     public sealed class EventChannel<T> : IEventChannel where T : struct
     {
         struct Live
@@ -20,10 +21,12 @@ namespace EOS.Events
         int _count;
 
         ulong _seq;
+        /// <summary>Highest sequence number assigned to a live event; consumers compare their cursor against it to early-out.</summary>
         public ulong MaxSeq => _seq;
 
         readonly List<ulong> _cursors = new();
 
+        /// <summary>Copies an event into the staging buffer; it becomes live on the next <see cref="Promote"/>.</summary>
         public void Enqueue(in T e)
         {
             if (_stagingCount >= _staging.Length)
@@ -31,19 +34,27 @@ namespace EOS.Events
             _staging[_stagingCount++] = e;
         }
 
+        /// <summary>Number of live events currently readable.</summary>
         public int LiveCount => _count - _head;
+        /// <summary>Live event value at the given index, boxed for the reflection path.</summary>
         public object BoxedAt(int index) => _live[_head + index].Value;
+        /// <summary>Live event value at the given index, unboxed for the typed path.</summary>
         public T ValueAt(int index) => _live[_head + index].Value;
+        /// <summary>Sequence number of the live event at the given index.</summary>
         public ulong SeqAt(int index) => _live[_head + index].Seq;
 
+        /// <summary>Registers a consumer and returns its cursor slot; the consumer reads each event once by advancing past it.</summary>
         public int RegisterConsumer()
         {
             _cursors.Add(0);
             return _cursors.Count - 1;
         }
+        /// <summary>Current cursor (last-read sequence watermark) for the given consumer slot.</summary>
         public ulong CursorOf(int slot) => _cursors[slot];
+        /// <summary>Advances the consumer slot's cursor to the latest sequence, marking all current live events as read.</summary>
         public void Advance(int slot) => _cursors[slot] = _seq;
 
+        /// <summary>Moves staged events into the live ring with ascending sequence numbers, stamping the given frame.</summary>
         public void Promote(ulong frame)
         {
             if (_stagingCount == 0) return;
@@ -60,6 +71,7 @@ namespace EOS.Events
             _stagingCount = 0;
         }
 
+        /// <summary>Drops live events that every consumer has read (min-cursor) or that exceed <paramref name="maxAge"/> frames.</summary>
         public void Trim(ulong frame, ulong maxAge)
         {
             ulong minCur = _seq;
@@ -86,6 +98,7 @@ namespace EOS.Events
             }
         }
 
+        /// <summary>Empties staging and live buffers and resets all sequence numbers and consumer cursors.</summary>
         public void Clear()
         {
             Array.Clear(_staging, 0, _stagingCount);

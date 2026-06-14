@@ -7,6 +7,7 @@ using EOS.Storage;
 
 namespace EOS.Entities
 {
+    /// <summary>Per-world entity table: tracks alive entities, reuses ids, and resolves names, validity, active state and stable keys.</summary>
     public class EntitiesContainer : WorldBound
     {
         int _next;
@@ -34,7 +35,9 @@ namespace EOS.Entities
         }
         internal EosEntity EntityFromId(int id) => new(id, _versions[id], World);
 
+        /// <summary>Returns an allocation-free struct enumerable over all alive entities.</summary>
         public AliveEntities All() => new(this);
+        /// <summary>Invokes <paramref name="action"/> for each alive entity.</summary>
         public void ForEach(Action<EosEntity> action)
         {
             for (int i = 0; i < _alive.Count; i++)
@@ -59,12 +62,14 @@ namespace EOS.Entities
             return (id, _versions[id], name);
         }
 
+        /// <summary>True when the entity is alive and flagged serializable.</summary>
         public bool IsSerializable(EosEntity entity)
         {
             int id = entity.Id;
             return id >= 0 && id < _serializable.Length && _exists[id] && _serializable[id] && _versions[id] == entity.Version;
         }
 
+        /// <summary>Looks up an entity by its stable key; returns false (and <see cref="EosEntity.Null"/>) if none.</summary>
         public bool TryFind(string key, out EosEntity entity)
         {
             if (!string.IsNullOrEmpty(key) && _keyToId.TryGetValue(key, out int id))
@@ -76,6 +81,7 @@ namespace EOS.Entities
             return false;
         }
 
+        /// <summary>Assigns a serialization-stable key to the entity (empty/null clears it); reassigning a key warns and moves it.</summary>
         public void SetStableKey(EosEntity entity, string key)
         {
             if (!IsValid(entity)) return;
@@ -94,6 +100,7 @@ namespace EOS.Entities
             else _idToKey.Remove(id);
         }
 
+        /// <summary>Returns the entity's stable key, or null if it has none or is invalid.</summary>
         public string GetStableKey(EosEntity entity)
         {
             if (!IsValid(entity)) return null;
@@ -101,21 +108,25 @@ namespace EOS.Entities
             return key;
         }
 
+        /// <summary>True when the handle refers to a live entity (exists and version matches).</summary>
         public bool IsValid(EosEntity entity)
         {
             int id = entity.Id;
             return id >= 0 && id < _exists.Length && _exists[id] && _versions[id] == entity.Version;
         }
+        /// <summary>True when the entity is valid and its whole ancestor branch is active (effective state).</summary>
         public bool IsActive(EosEntity entity)
         {
             int id = entity.Id;
             return id >= 0 && id < _exists.Length && _exists[id] && _versions[id] == entity.Version && World.Hierarchy.IsBranchActive(id);
         }
+        /// <summary>True when the entity is valid and its own active flag is set, ignoring ancestors.</summary>
         public bool IsActiveSelf(EosEntity entity)
         {
             int id = entity.Id;
             return id >= 0 && id < _exists.Length && _exists[id] && _actives[id] && _versions[id] == entity.Version;
         }
+        /// <summary>Sets the entity's own active flag and refreshes readiness across its branch.</summary>
         public void SetActive(EosEntity entity, bool active)
         {
             if (!IsValid(entity)) return;
@@ -124,6 +135,7 @@ namespace EOS.Entities
             World.Hierarchy.OnSelfActiveChanged(entity);
         }
 
+        /// <summary>Destroys the entity (cascading children first), bumps its version, frees its id, and clears its components and tags.</summary>
         public void Destroy(EosEntity entity)
         {
             if (!IsValid(entity)) return;
@@ -187,18 +199,25 @@ namespace EOS.Entities
             _idToKey.Clear();
         }
 
+        /// <summary>Allocation-free struct enumerable over the container's alive entities.</summary>
         public readonly struct AliveEntities
         {
             readonly EntitiesContainer _c;
+            /// <summary>Wraps the given container for enumeration.</summary>
             public AliveEntities(EntitiesContainer c) => _c = c;
+            /// <summary>Returns a struct enumerator over the alive entities.</summary>
             public Enumerator GetEnumerator() => new(_c);
 
+            /// <summary>Struct enumerator walking the alive-entity list.</summary>
             public struct Enumerator
             {
                 readonly EntitiesContainer _c;
                 int _i;
+                /// <summary>Creates an enumerator positioned before the first alive entity.</summary>
                 public Enumerator(EntitiesContainer c) { _c = c; _i = -1; }
+                /// <summary>The entity at the current position.</summary>
                 public EosEntity Current => _c.At(_i);
+                /// <summary>Advances to the next alive entity; false when exhausted.</summary>
                 public bool MoveNext() => ++_i < _c.AliveCount;
             }
         }

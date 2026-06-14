@@ -6,10 +6,12 @@ using EOS.Logging;
 
 namespace EOS.Events
 {
+    /// <summary>Per-world owner of all <see cref="EventChannel{T}"/> instances; emits events and drives their per-phase promote/trim lifecycle.</summary>
     public sealed class EventsContainer : WorldBound
     {
         readonly Dictionary<Type, IEventChannel> _channels = new();
 
+        /// <summary>Hard cap in frames on how long a live event survives, so an undriven phase cannot leak unread events.</summary>
         public const ulong MaxAge = 16;
 
         EventChannel<T> Get<T>() where T : struct
@@ -22,8 +24,10 @@ namespace EOS.Events
             return created;
         }
 
+        /// <summary>Stages an event of type <typeparamref name="T"/> for emission; safe mid-iteration since it is not a structural change.</summary>
         public void Enqueue<T>(in T e) where T : struct => Get<T>().Enqueue(e);
 
+        /// <summary>Returns the channel for event type <typeparamref name="T"/>, creating it on first access.</summary>
         public EventChannel<T> Channel<T>() where T : struct => Get<T>();
 
         internal IEventChannel ChannelFor(Type eventType)

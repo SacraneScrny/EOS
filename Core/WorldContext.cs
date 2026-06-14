@@ -8,15 +8,22 @@ using EOS.Serialization;
 
 namespace EOS.Core
 {
+    /// <summary>A per-world typed blackboard of struct values, keyed by type; values implementing <c>ISerializableContext</c> are captured into snapshots.</summary>
     public interface IWorldContext
     {
+        /// <summary>Returns the stored value of type <typeparamref name="T"/>, or <c>default</c> (with a warning) if none is set.</summary>
         T Get<T>() where T : struct;
+        /// <summary>Returns the stored value of type <typeparamref name="T"/> if present, without warning on a miss.</summary>
         bool TryGet<T>(out T value) where T : struct;
+        /// <summary>Whether a value of type <typeparamref name="T"/> is currently set.</summary>
         bool Has<T>() where T : struct;
+        /// <summary>Stores (or overwrites) the value of type <typeparamref name="T"/>, stamping it as changed.</summary>
         void Set<T>(in T value) where T : struct;
+        /// <summary>Removes the value of type <typeparamref name="T"/>, stamping it as changed.</summary>
         void Clear<T>() where T : struct;
     }
 
+    /// <summary>The default <see cref="IWorldContext"/> implementation backing <c>World.Context</c>; also tracks per-consumer change cursors for system-side <c>Changed</c> queries.</summary>
     public class WorldContext : WorldBound, IWorldContext
     {
         sealed class RefComparer : IEqualityComparer<object>
@@ -67,6 +74,7 @@ namespace EOS.Core
             return created;
         }
 
+        /// <summary>Stores (or overwrites) the value of type <typeparamref name="T"/>, stamping it as changed.</summary>
         public void Set<T>(in T value) where T : struct
         {
             var cell = CellOf<T>(true);
@@ -75,6 +83,7 @@ namespace EOS.Core
             cell.Stamp = ++_seq;
         }
 
+        /// <summary>Returns the stored value of type <typeparamref name="T"/>, or <c>default</c> (with a warning) if none is set.</summary>
         public T Get<T>() where T : struct
         {
             var cell = CellOf<T>(false);
@@ -86,6 +95,7 @@ namespace EOS.Core
             return cell.Value;
         }
 
+        /// <summary>Returns the stored value of type <typeparamref name="T"/> if present, without warning on a miss.</summary>
         public bool TryGet<T>(out T value) where T : struct
         {
             var cell = CellOf<T>(false);
@@ -98,12 +108,14 @@ namespace EOS.Core
             return true;
         }
 
+        /// <summary>Whether a value of type <typeparamref name="T"/> is currently set.</summary>
         public bool Has<T>() where T : struct
         {
             var cell = CellOf<T>(false);
             return cell != null && cell.Has;
         }
 
+        /// <summary>Removes the value of type <typeparamref name="T"/>, stamping it as changed.</summary>
         public void Clear<T>() where T : struct
         {
             var cell = CellOf<T>(false);
@@ -172,6 +184,7 @@ namespace EOS.Core
         }
     }
 
+    /// <summary>A system's view onto the world context, exposed as <c>EosSystem.Context</c>; adds per-system <see cref="Changed{T}(out T)"/> change tracking on top of the plain accessors.</summary>
     public readonly struct LocalSystemContext
     {
         readonly WorldContext _context;
@@ -183,12 +196,19 @@ namespace EOS.Core
             _consumer = consumer;
         }
 
+        /// <summary>Stores (or overwrites) the value of type <typeparamref name="T"/>.</summary>
         public void Set<T>(in T value) where T : struct => _context.Set(value);
+        /// <summary>Returns the stored value of type <typeparamref name="T"/>, or <c>default</c> (with a warning) if none is set.</summary>
         public T Get<T>() where T : struct => _context.Get<T>();
+        /// <summary>Returns the stored value of type <typeparamref name="T"/> if present.</summary>
         public bool TryGet<T>(out T value) where T : struct => _context.TryGet(out value);
+        /// <summary>Whether a value of type <typeparamref name="T"/> is currently set.</summary>
         public bool Has<T>() where T : struct => _context.Has<T>();
+        /// <summary>Removes the value of type <typeparamref name="T"/>.</summary>
         public void Clear<T>() where T : struct => _context.Clear<T>();
+        /// <summary>Returns the current value of <typeparamref name="T"/> and true if it changed since this system last observed it.</summary>
         public bool Changed<T>(out T value) where T : struct => _context.Changed<T>(_consumer, out value);
+        /// <summary>Returns true if the value of <typeparamref name="T"/> changed since this system last observed it.</summary>
         public bool Changed<T>() where T : struct => _context.Changed<T>(_consumer);
     }
 }

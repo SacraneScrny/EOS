@@ -10,20 +10,33 @@ using EOS.Objects;
 
 namespace EOS.CodeGen
 {
+    /// <summary>Classified description of a single system <c>Execute</c> parameter: its type and the query role/flags derived from its type and attributes.</summary>
     public readonly struct QueryParam
     {
+        /// <summary>Zero-based parameter position in the method signature.</summary>
         public readonly int Position;
+        /// <summary>The declared parameter type (ref/array element unwrapped by callers).</summary>
         public readonly Type Type;
+        /// <summary>True if the parameter is a concrete <see cref="EosObject"/> component.</summary>
         public readonly bool IsConcrete;
+        /// <summary>True if the parameter is an interface component (fan-out across implementations).</summary>
         public readonly bool IsInterface;
+        /// <summary>True if the parameter receives the owning <see cref="EosEntity"/>.</summary>
         public readonly bool IsEntity;
+        /// <summary>True if the parameter receives the delta time <c>float</c>.</summary>
         public readonly bool IsDelta;
+        /// <summary>True if the component is optional (<c>[Optional]</c>).</summary>
         public readonly bool Optional;
+        /// <summary>True if the parameter is reactive (<c>[New]</c> or <c>[Bumped]</c>).</summary>
         public readonly bool Reactive;
+        /// <summary>True if the reactive channel is <c>[Bumped]</c> rather than <c>[New]</c>.</summary>
         public readonly bool Bumped;
+        /// <summary>True if the interface parameter fans out per implementation (<c>[Each]</c>).</summary>
         public readonly bool Each;
+        /// <summary>True if the parameter type cannot be classified into any query role.</summary>
         public readonly bool Unsupported;
 
+        /// <summary>Constructs a fully classified parameter descriptor.</summary>
         public QueryParam(int position, Type type, bool isConcrete, bool isInterface, bool isEntity, bool isDelta, bool optional, bool reactive, bool bumped, bool each, bool unsupported)
         {
             Position = position;
@@ -40,8 +53,10 @@ namespace EOS.CodeGen
         }
     }
 
+    /// <summary>Shared shape analysis over system methods: classifies parameters, finds interface implementations, and decides which methods can take a typed (codegen) body.</summary>
     public static class SystemShape
     {
+        /// <summary>Classifies every parameter of <paramref name="method"/> into <see cref="QueryParam"/> descriptors.</summary>
         public static List<QueryParam> Parameters(MethodInfo method)
         {
             var result = new List<QueryParam>();
@@ -64,6 +79,7 @@ namespace EOS.CodeGen
             return result;
         }
 
+        /// <summary>True if any parameter of <paramref name="method"/> is a reactive (<c>[New]</c>/<c>[Bumped]</c>) channel.</summary>
         public static bool IsReactive(MethodInfo method)
         {
             foreach (var p in Parameters(method))
@@ -73,6 +89,7 @@ namespace EOS.CodeGen
 
         static readonly Dictionary<Type, List<Type>> _implCache = new();
 
+        /// <summary>Returns all non-abstract, parameterless-constructible <see cref="EosObject"/> types implementing <paramref name="iface"/>, sorted and cached.</summary>
         public static IReadOnlyList<Type> ImplementationsOf(Type iface)
         {
             if (_implCache.TryGetValue(iface, out var cached)) return cached;
@@ -105,6 +122,7 @@ namespace EOS.CodeGen
             return result;
         }
 
+        /// <summary>Computes a stable hash over the method signature and its resolved interface implementations, used to detect a stale generated registry.</summary>
         public static string ShapeHash(MethodInfo method)
         {
             var sb = new StringBuilder();
@@ -139,6 +157,7 @@ namespace EOS.CodeGen
             return hash.ToString("x16");
         }
 
+        /// <summary>True if <paramref name="method"/> is an <c>Execute</c> whose parameter shape can be emitted as a typed, allocation-free codegen body.</summary>
         public static bool CanTypeBody(MethodInfo method)
         {
             if (method.Name != "Execute") return false;

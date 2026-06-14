@@ -13,6 +13,7 @@ using EOS.Systems.Groups;
 
 namespace EOS.Systems
 {
+    /// <summary>Discovers every <see cref="EosSystem"/> at world init, builds a per-phase query body for each, and drives them in topological order each frame.</summary>
     public partial class SystemsRunner : WorldBound
     {
         sealed class SystemEntry
@@ -331,7 +332,9 @@ namespace EOS.Systems
             }
         }
 
+        /// <summary>Returns the live instance of system type <typeparamref name="T"/>, or null if no such system was discovered.</summary>
         public T GetSystem<T>() where T : EosSystem => _typeToSystem.TryGetValue(typeof(T), out var system) ? (T)system : null;
+        /// <summary>Every discovered system instance, in discovery order.</summary>
         public IEnumerable<EosSystem> All => _all;
         
         internal void Dispose()

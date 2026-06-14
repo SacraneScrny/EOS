@@ -4,8 +4,10 @@ using System.Text;
 
 namespace EOS.CodeGen
 {
+    /// <summary>Builds a stable textual signature (name plus fully-qualified parameter types) for a system <c>Execute</c>/<c>EventExecute</c> method, used as the key shared by reflection and codegen paths.</summary>
     public static class SystemSignature
     {
+        /// <summary>Returns the signature string <c>Name(Type,Type,...)</c> for <paramref name="method"/>.</summary>
         public static string Of(MethodInfo method)
         {
             var sb = new StringBuilder();

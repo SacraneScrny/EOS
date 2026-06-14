@@ -12,12 +12,14 @@ using EOS.Systems;
 
 namespace EOS.CodeGen
 {
+    /// <summary>Emits a self-installing zero-alloc system registry from the discovered <see cref="EosSystem"/> types, replacing the reflection path when present. Re-run after adding, removing or changing systems.</summary>
     public static class SystemRegistryGenerator
     {
         const string DefaultNamespace = "EOS.Generated";
         const string DefaultClassName = "EosGeneratedSystems";
         const string DefaultFileName = "EosGeneratedSystems.g.cs";
 
+        /// <summary>Generates the registry source and writes it to <paramref name="outputDirectory"/>/<paramref name="fileName"/>; returns the written path.</summary>
         public static string Generate(
             string outputDirectory = "_Generated",
             string @namespace = DefaultNamespace,
@@ -31,6 +33,7 @@ namespace EOS.CodeGen
             return path;
         }
 
+        /// <summary>Builds and returns the generated registry C# source as a string, without writing a file.</summary>
         public static string BuildSource(string @namespace = DefaultNamespace, string className = DefaultClassName)
         {
             var systems = DiscoverSystems();

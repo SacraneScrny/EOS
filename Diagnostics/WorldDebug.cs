@@ -8,8 +8,10 @@ using EOS.Storage;
 
 namespace EOS.Diagnostics
 {
+    /// <summary>Renders read-only text dumps of worlds and entities for diagnostics and tooling.</summary>
     public static class WorldDebug
     {
+        /// <summary>Returns a text dump of the default world and every other registered world.</summary>
         public static string DumpUniverse()
         {
             var sb = new StringBuilder();
@@ -24,6 +26,7 @@ namespace EOS.Diagnostics
             return sb.ToString();
         }
 
+        /// <summary>Returns a text dump of one world (header, counts, and per-entity detail); empty string if null.</summary>
         public static string DumpWorld(IReadOnlyWorld world)
         {
             if (world == null) return string.Empty;
@@ -32,6 +35,7 @@ namespace EOS.Diagnostics
             return sb.ToString();
         }
 
+        /// <summary>Returns a text dump of a single entity (id, state, parent/children, components, tags).</summary>
         public static string DumpEntity(EosEntity entity)
         {
             var sb = new StringBuilder();
