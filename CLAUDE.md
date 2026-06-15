@@ -59,7 +59,7 @@ So a world driven only through `FixedUpdate` never sees those buffers (and never
 
 Only `Systems.*` and `Objects.*` run inside the iteration guard. The `Before*/After*` ECBs and `InitializeSystems` run outside it, so structural changes there are unguarded by design. The guard is a depth counter (`_iterationDepth`), surfaced as `World.IsIterating`.
 
-`World.Frame` advances once per phase call. `World.Version` is a separate watermark that advances only on `MarkReady` and `Bump` (see Storage); reactive cursors compare against it. `World.CurrentPhase` records the running phase and `World.AfterCurrentPhase` maps it to `AfterUpdate` / `AfterFixedUpdate` / `AfterLateUpdate` — use it for deferral when the calling phase is unknown.
+`World.Frame` advances once per phase call. `World.Version` is a separate watermark that advances on every reactive stamp — `MarkReady`, `Bump`, enable/disable transitions, and removals (see Storage); reactive cursors compare against it. `World.CurrentPhase` records the running phase and `World.AfterCurrentPhase` maps it to `AfterUpdate` / `AfterFixedUpdate` / `AfterLateUpdate` — use it for deferral when the calling phase is unknown.
 
 ### Entity identity
 
@@ -104,7 +104,7 @@ Protected virtuals: `OnAwake`, `OnStart`, `OnDispose`, `OnDebugDraw`. Protected 
 
 `Storage<T>` is a dense-array sparse-set, not a dictionary. Parallel arrays (`_data`, `_owners`, `_ownerVersions`, `_addVersion`, `_markVersion`, `_ready`, …) are indexed by a dense slot; `_sparse` maps `entity.Id → dense slot`, validated by `_owners[slot] == id && _ownerVersions[slot] == version`. Removal uses swap-remove to keep the dense array contiguous, fixing up `_sparse` for the moved tail element. `All` exposes the dense span; `At(index)` / `GetOwner(index)` / `IsReady(index)` are the iteration primitives queries build on.
 
-Reactive watermarks live here: `MarkReady` stamps `_addVersion` (drives `[New]`), `Bump` stamps `_markVersion` (drives `[Bumped]`), both via `World.NextVersion()`. `MaxAddVersion` / `MaxMarkVersion` are monotonic per-storage high-water marks used to early-out reactive scans.
+Reactive watermarks live here: `MarkReady` stamps `_addVersion` (drives `[New]`), `Bump` stamps `_markVersion` (drives `[Bumped]`), `RefreshReady` stamps `_enableVersion`/`_disableVersion` (with a per-slot cascade flag) on a readiness transition (drives `[Enabled]`/`[Disabled]`), and `Remove` appends to a per-storage **removal log** (id+version+cascade, drives `[Removed]`) — all via `World.NextVersion()`. `MaxAddVersion` / `MaxMarkVersion` / `MaxEnableVersion` / `MaxDisableVersion` / `MaxRemoveVersion` are monotonic per-storage high-water marks used to early-out reactive scans. The removal log is frame-age trimmed (`RemovalMaxAge`, 16 frames, mirroring `EventsContainer.MaxAge`) on append; read-once is preserved by each reactive system's cursor, so residual entries are harmless. `Clear()` wipes the log and every watermark.
 
 **Component pooling** is opt-in per type via the empty marker `IPoolableObject` (`EOS.Objects.Interfaces`). When `T : IPoolableObject`, `Storage<T>` keeps an unbounded `Stack<T>`: `Remove` disposes the instance as usual (so `OnDispose` still runs), then `EosObject.ResetForReuse()` restores its lifecycle flags to construction defaults and returns it to the pool instead of dropping it on GC; `Add` rents from the pool when non-empty instead of `new T()`. The reused instance re-runs the full lifecycle (`Awake`/`Start` → `MarkReady`), so `[New]` re-fires and pooling is transparent — there are **no** `OnRent`/`OnReturn` hooks (unlike Unity view pooling, where Unity doesn't re-call `Awake`/`OnDestroy`); reset stale data fields in `OnDispose` or fully initialize in `OnAwake`. Types without the marker always allocate a fresh instance. `Clear()` drains the pool.
 
@@ -122,8 +122,13 @@ Reactive watermarks live here: `MarkReady` stamps `_addVersion` (drives `[New]`)
 | `[Each] IFoo` | cartesian fan-out over all matching implementations |
 | `[New] T` | reactive: fires only when T was recently added (`MarkReady`) |
 | `[Bumped] T` | reactive: fires only when `Bump()` was called on T this version window |
+| `[Enabled] T` | reactive: fires on a disabled→enabled transition (not first ready — that is `[New]`) |
+| `[Disabled] T` | reactive: fires on an enabled→disabled transition; delivers the now-not-ready instance |
+| `[Removed] T` | reactive: fires once when a T was removed; delivers only the `EosEntity` (T is null) |
 | `EosEntity` | receives the owning entity |
 | `float` | receives delta time |
+
+`[Enabled]` / `[Disabled]` / `[Removed]` each take an opt-in `includeCascade` flag (default `false`): by default they fire only on **explicit** edges (`component.Enable/Disable/SetEnabled`, `entity.Remove<T>()`); with `includeCascade: true` they also fire on **cascade** edges (entity/parent active-state change → enable/disable across the subtree; `entity.Destroy()` → removal of each component). The explicit-vs-cascade split is the seam between `RefreshReady` (from `SetEnabled`) / `Storage.Remove` (explicit) and `RefreshReadyAll` (active-state) / `RemoveEntity` (destroy). `[Removed]` must be the sole component parameter and only delivers `EosEntity` (a destroy-cascade handle is stale — only `Id` is meaningful). `[Disabled]` is the one channel that scans not-ready slots.
 
 Method-level filters: `[Include(params Type[])]` / `[Exclude(params Type[])]` (has / not-has), and tag filters `[WithTag]`, `[WithoutTag]`, `[WithAnyTag]`, `[WithOneTag]` (all `params object[]` — strings or enum values).
 

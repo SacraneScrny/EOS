@@ -225,7 +225,7 @@ NextFrame
 
 Only `Systems.*` and `Objects.*` run inside the **iteration guard**, where direct structural changes are blocked (see [Deferred structural changes](#deferred-structural-changes)). The `Before*/After*` buffers and `InitializeSystems` run outside it, so structural work there is unguarded by design.
 
-`World.Frame` advances once per phase call. `World.Version` is a separate watermark that advances only on component `MarkReady`/`Bump` — reactive cursors compare against it. `World.CurrentPhase` reports which phase is running, and `World.AfterCurrentPhase` resolves to the matching after-buffer (`AfterUpdate` / `AfterFixedUpdate` / `AfterLateUpdate`) — handy for code that may be called from any phase.
+`World.Frame` advances once per phase call. `World.Version` is a separate watermark that advances on every reactive stamp — component `MarkReady`/`Bump`, enable/disable transitions, and removals — reactive cursors compare against it. `World.CurrentPhase` reports which phase is running, and `World.AfterCurrentPhase` resolves to the matching after-buffer (`AfterUpdate` / `AfterFixedUpdate` / `AfterLateUpdate`) — handy for code that may be called from any phase.
 
 ### Entities
 
@@ -337,8 +337,13 @@ An `EosSystem` declares one or more `Execute(...)` methods. **The parameter type
 | `[Each] IFoo`        | cartesian fan-out over **all** matching implementations              |
 | `[New] T`            | reactive: fires only when `T` recently became ready                  |
 | `[Bumped] T`         | reactive: fires only when `Bump()` was called on `T` this window     |
+| `[Enabled] T`        | reactive: fires on a disabled→enabled transition (not first ready)   |
+| `[Disabled] T`       | reactive: fires on an enabled→disabled transition (delivers the instance) |
+| `[Removed] T`        | reactive: fires once when a `T` was removed (delivers only `EosEntity`) |
 | `EosEntity`          | receives the owning entity                                           |
 | `float`              | receives delta time                                                  |
+
+`[Enabled]` / `[Disabled]` / `[Removed]` take an opt-in `includeCascade` flag (default `false`): by default they fire only on explicit edges (`Enable`/`Disable`/`SetEnabled`, `Remove<T>()`); with `includeCascade: true` they also fire on cascade edges (entity/parent active-state changes, `entity.Destroy()`).
 
 ```csharp
 public class MovementSystem : EosSystem

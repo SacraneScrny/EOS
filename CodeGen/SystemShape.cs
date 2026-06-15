@@ -27,17 +27,17 @@ namespace EOS.CodeGen
         public readonly bool IsDelta;
         /// <summary>True if the component is optional (<c>[Optional]</c>).</summary>
         public readonly bool Optional;
-        /// <summary>True if the parameter is reactive (<c>[New]</c> or <c>[Bumped]</c>).</summary>
+        /// <summary>True if the parameter is reactive (<c>[New]</c>/<c>[Bumped]</c>/<c>[Enabled]</c>/<c>[Disabled]</c>/<c>[Removed]</c>).</summary>
         public readonly bool Reactive;
-        /// <summary>True if the reactive channel is <c>[Bumped]</c> rather than <c>[New]</c>.</summary>
-        public readonly bool Bumped;
+        internal readonly Channel Channel;
+        /// <summary>True if the reactive attribute opted into cascade edges (<c>includeCascade: true</c>).</summary>
+        public readonly bool IncludeCascade;
         /// <summary>True if the interface parameter fans out per implementation (<c>[Each]</c>).</summary>
         public readonly bool Each;
         /// <summary>True if the parameter type cannot be classified into any query role.</summary>
         public readonly bool Unsupported;
 
-        /// <summary>Constructs a fully classified parameter descriptor.</summary>
-        public QueryParam(int position, Type type, bool isConcrete, bool isInterface, bool isEntity, bool isDelta, bool optional, bool reactive, bool bumped, bool each, bool unsupported)
+        internal QueryParam(int position, Type type, bool isConcrete, bool isInterface, bool isEntity, bool isDelta, bool optional, bool reactive, Channel channel, bool includeCascade, bool each, bool unsupported)
         {
             Position = position;
             Type = type;
@@ -47,7 +47,8 @@ namespace EOS.CodeGen
             IsDelta = isDelta;
             Optional = optional;
             Reactive = reactive;
-            Bumped = bumped;
+            Channel = channel;
+            IncludeCascade = includeCascade;
             Each = each;
             Unsupported = unsupported;
         }
@@ -63,8 +64,8 @@ namespace EOS.CodeGen
             foreach (var p in method.GetParameters())
             {
                 bool optional = p.GetCustomAttribute<OptionalAttribute>() != null;
-                bool bumped = p.GetCustomAttribute<BumpedAttribute>() != null;
-                bool reactive = bumped || p.GetCustomAttribute<NewAttribute>() != null;
+                var channel = ChannelOf(p, out bool includeCascade);
+                bool reactive = channel != Channel.None;
                 bool each = p.GetCustomAttribute<EachAttribute>() != null;
 
                 var type = p.ParameterType;
@@ -74,17 +75,31 @@ namespace EOS.CodeGen
                 bool isConcrete = !isEntity && !isDelta && !isInterface && typeof(EosObject).IsAssignableFrom(type);
                 bool unsupported = !isEntity && !isDelta && !isInterface && !isConcrete;
 
-                result.Add(new QueryParam(p.Position, type, isConcrete, isInterface, isEntity, isDelta, optional, reactive, bumped, each, unsupported));
+                result.Add(new QueryParam(p.Position, type, isConcrete, isInterface, isEntity, isDelta, optional, reactive, channel, includeCascade, each, unsupported));
             }
             return result;
         }
 
-        /// <summary>True if any parameter of <paramref name="method"/> is a reactive (<c>[New]</c>/<c>[Bumped]</c>) channel.</summary>
+        /// <summary>True if any parameter of <paramref name="method"/> is a reactive channel (<c>[New]</c>/<c>[Bumped]</c>/<c>[Enabled]</c>/<c>[Disabled]</c>/<c>[Removed]</c>).</summary>
         public static bool IsReactive(MethodInfo method)
         {
             foreach (var p in Parameters(method))
                 if (p.Reactive) return true;
             return false;
+        }
+
+        internal static Channel ChannelOf(ParameterInfo p, out bool includeCascade)
+        {
+            includeCascade = false;
+            if (p.GetCustomAttribute<NewAttribute>() != null) return Channel.New;
+            if (p.GetCustomAttribute<BumpedAttribute>() != null) return Channel.Bumped;
+            var enabled = p.GetCustomAttribute<EnabledAttribute>();
+            if (enabled != null) { includeCascade = enabled.IncludeCascade; return Channel.Enabled; }
+            var disabled = p.GetCustomAttribute<DisabledAttribute>();
+            if (disabled != null) { includeCascade = disabled.IncludeCascade; return Channel.Disabled; }
+            var removed = p.GetCustomAttribute<RemovedAttribute>();
+            if (removed != null) { includeCascade = removed.IncludeCascade; return Channel.Removed; }
+            return Channel.None;
         }
 
         static readonly Dictionary<Type, List<Type>> _implCache = new();
@@ -132,7 +147,11 @@ namespace EOS.CodeGen
             {
                 sb.Append('|').Append(p.Position).Append(':');
                 if (p.Optional) sb.Append('O');
-                if (p.Reactive) sb.Append(p.Bumped ? 'B' : 'N');
+                if (p.Reactive)
+                {
+                    sb.Append(ChannelLetter(p.Channel));
+                    if (p.IncludeCascade) sb.Append('c');
+                }
                 if (p.Each) sb.Append('E');
                 if (p.IsInterface)
                 {
@@ -147,8 +166,22 @@ namespace EOS.CodeGen
                 }
             }
 
+            return FnvHash(sb.ToString());
+        }
+
+        static char ChannelLetter(Channel channel) => channel switch
+        {
+            Channel.New => 'N',
+            Channel.Bumped => 'B',
+            Channel.Enabled => 'E',
+            Channel.Disabled => 'D',
+            Channel.Removed => 'R',
+            _ => '?'
+        };
+
+        static string FnvHash(string text)
+        {
             ulong hash = 14695981039346656037UL;
-            var text = sb.ToString();
             for (int i = 0; i < text.Length; i++)
             {
                 hash ^= text[i];
@@ -167,10 +200,14 @@ namespace EOS.CodeGen
             bool anyComponentOrInterface = false;
             bool reactive = false;
             bool reactiveDriver = false;
+            int removedCount = 0;
+            int componentOrInterfaceCount = 0;
 
             foreach (var p in Parameters(method))
             {
                 if (p.Unsupported) return false;
+                if (p.Channel == Channel.Removed && (p.IsInterface || p.Optional)) return false;
+                if (p.Channel == Channel.Removed) removedCount++;
                 if (p.Reactive)
                 {
                     reactive = true;
@@ -178,15 +215,20 @@ namespace EOS.CodeGen
                 }
                 if (p.IsConcrete)
                 {
+                    componentOrInterfaceCount++;
                     anyComponentOrInterface = true;
                     if (!p.Optional) anyMandatoryConcrete = true;
                 }
                 else if (p.IsInterface)
                 {
+                    componentOrInterfaceCount++;
                     anyComponentOrInterface = true;
                     if (!p.Optional) anyMandatoryInterface = true;
                 }
             }
+
+            if (removedCount > 0)
+                return removedCount == 1 && componentOrInterfaceCount == 1;
 
             if (reactive) return reactiveDriver;
             return anyMandatoryConcrete || anyMandatoryInterface || !anyComponentOrInterface;

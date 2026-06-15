@@ -17,14 +17,28 @@ namespace EOS.Storage
         static readonly bool Poolable = typeof(IPoolableObject).IsAssignableFrom(typeof(T));
         readonly Stack<T> _pool = typeof(IPoolableObject).IsAssignableFrom(typeof(T)) ? new Stack<T>() : null;
 
+        const ulong RemovalMaxAge = 16;
+
         T[] _data = new T[InitialCapacity];
         int[] _owners = new int[InitialCapacity];
         ushort[] _ownerVersions = new ushort[InitialCapacity];
         ulong[] _addVersion = new ulong[InitialCapacity];
         ulong[] _markVersion = new ulong[InitialCapacity];
         ulong[] _markFrame = new ulong[InitialCapacity];
+        ulong[] _enableVersion = new ulong[InitialCapacity];
+        ulong[] _disableVersion = new ulong[InitialCapacity];
+        bool[] _enableCascade = new bool[InitialCapacity];
+        bool[] _disableCascade = new bool[InitialCapacity];
         bool[] _ready = new bool[InitialCapacity];
         int[] _sparse = new int[InitialCapacity];
+
+        int[] _removedOwnerId = new int[InitialCapacity];
+        ushort[] _removedOwnerVersion = new ushort[InitialCapacity];
+        ulong[] _removedVersion = new ulong[InitialCapacity];
+        ulong[] _removedFrame = new ulong[InitialCapacity];
+        bool[] _removedCascade = new bool[InitialCapacity];
+        int _removedHead;
+        int _removedTail;
 
         /// <summary>Number of components currently stored.</summary>
         public int Count { get; private set; }
@@ -35,10 +49,34 @@ namespace EOS.Storage
         public ulong MaxAddVersion { get; private set; }
         /// <summary>Monotonic high-water mark of mark-versions, used to early-out <c>[Bumped]</c> reactive scans.</summary>
         public ulong MaxMarkVersion { get; private set; }
+        /// <summary>Monotonic high-water mark of enable-versions, used to early-out <c>[Enabled]</c> reactive scans.</summary>
+        public ulong MaxEnableVersion { get; private set; }
+        /// <summary>Monotonic high-water mark of disable-versions, used to early-out <c>[Disabled]</c> reactive scans.</summary>
+        public ulong MaxDisableVersion { get; private set; }
+        /// <summary>Monotonic high-water mark of remove-versions, used to early-out <c>[Removed]</c> reactive scans.</summary>
+        public ulong MaxRemoveVersion { get; private set; }
         /// <summary>The add-version stamped at the given dense index.</summary>
         public ulong AddVersionAt(int index) => _addVersion[index];
         /// <summary>The mark-version stamped at the given dense index.</summary>
         public ulong MarkVersionAt(int index) => _markVersion[index];
+        /// <summary>The enable-version stamped at the given dense index (last disabled→enabled transition).</summary>
+        public ulong EnableVersionAt(int index) => _enableVersion[index];
+        /// <summary>The disable-version stamped at the given dense index (last enabled→disabled transition).</summary>
+        public ulong DisableVersionAt(int index) => _disableVersion[index];
+        /// <summary>Whether the last enable transition at the given dense index was a cascade.</summary>
+        public bool EnableCascadeAt(int index) => _enableCascade[index];
+        /// <summary>Whether the last disable transition at the given dense index was a cascade.</summary>
+        public bool DisableCascadeAt(int index) => _disableCascade[index];
+
+        /// <summary>Number of live entries in the removal log.</summary>
+        public int RemovedCount => _removedTail - _removedHead;
+        /// <summary>The entity whose component was removed at the given removal-log index (may be a stale handle for destroy cascades).</summary>
+        public EosEntity RemovedOwnerAt(int index)
+            => new(_removedOwnerId[_removedHead + index], _removedOwnerVersion[_removedHead + index], World);
+        /// <summary>The remove-version stamped at the given removal-log index.</summary>
+        public ulong RemovedVersionAt(int index) => _removedVersion[_removedHead + index];
+        /// <summary>Whether the removal at the given removal-log index was a cascade (entity destroy).</summary>
+        public bool RemovedCascadeAt(int index) => _removedCascade[_removedHead + index];
 
         /// <summary>The dense index of the entity's component, or -1 if absent.</summary>
         public int IndexOf(EosEntity entity)
@@ -68,6 +106,10 @@ namespace EOS.Storage
             _addVersion[i] = 0;
             _markVersion[i] = 0;
             _markFrame[i] = 0;
+            _enableVersion[i] = 0;
+            _disableVersion[i] = 0;
+            _enableCascade[i] = false;
+            _disableCascade[i] = false;
             _ready[i] = false;
             _sparse[entity.Id] = i;
             _data[i] = (Poolable && _pool.Count > 0) ? _pool.Pop() : new T();
@@ -130,13 +172,14 @@ namespace EOS.Storage
         public EosEntity GetOwner(int index) =>
             new(_owners[index], _ownerVersions[index], World);
 
-        /// <summary>Removes and disposes the entity's component (returning it to the pool if poolable). Guarded against mid-iteration structural changes.</summary>
-        public bool Remove(EosEntity entity)
+        /// <summary>Removes and disposes the entity's component (returning it to the pool if poolable), recording the removal for the <c>[Removed]</c> channel. Guarded against mid-iteration structural changes. <paramref name="cascade"/> marks the removal as driven by an entity destroy rather than an explicit <c>Remove&lt;T&gt;()</c>.</summary>
+        public bool Remove(EosEntity entity, bool cascade = false)
         {
             int i = IndexOf(entity);
             if (i < 0) return false;
             if (!World.GuardStructuralChange($"Remove<{typeof(T).Name}>")) return false;
             var toDispose = _data[i];
+            RecordRemoval(_owners[i], _ownerVersions[i], cascade);
             int last = --Count;
 
             if (i != last)
@@ -147,6 +190,10 @@ namespace EOS.Storage
                 _addVersion[i] = _addVersion[last];
                 _markVersion[i] = _markVersion[last];
                 _markFrame[i] = _markFrame[last];
+                _enableVersion[i] = _enableVersion[last];
+                _disableVersion[i] = _disableVersion[last];
+                _enableCascade[i] = _enableCascade[last];
+                _disableCascade[i] = _disableCascade[last];
                 _ready[i] = _ready[last];
                 _sparse[_owners[i]] = i;
             }
@@ -163,14 +210,66 @@ namespace EOS.Storage
             _addVersion[last] = 0;
             _markVersion[last] = 0;
             _markFrame[last] = 0;
+            _enableVersion[last] = 0;
+            _disableVersion[last] = 0;
+            _enableCascade[last] = false;
+            _disableCascade[last] = false;
             _ready[last] = false;
 
             World.ObjectsStorages.UntrackEntity(entity, this);
             return true;
         }
 
-        /// <summary>Removes the entity's component, if present (non-generic <see cref="IStorage"/> entry point).</summary>
-        public void RemoveEntity(EosEntity entity) => Remove(entity);
+        /// <summary>Removes the entity's component, if present (non-generic <see cref="IStorage"/> entry point); classified as a cascade removal.</summary>
+        public void RemoveEntity(EosEntity entity) => Remove(entity, cascade: true);
+
+        void RecordRemoval(int ownerId, ushort ownerVersion, bool cascade)
+        {
+            TrimRemovals();
+            if (_removedTail == _removedOwnerId.Length)
+            {
+                if (_removedHead > 0)
+                {
+                    int live = _removedTail - _removedHead;
+                    Array.Copy(_removedOwnerId, _removedHead, _removedOwnerId, 0, live);
+                    Array.Copy(_removedOwnerVersion, _removedHead, _removedOwnerVersion, 0, live);
+                    Array.Copy(_removedVersion, _removedHead, _removedVersion, 0, live);
+                    Array.Copy(_removedFrame, _removedHead, _removedFrame, 0, live);
+                    Array.Copy(_removedCascade, _removedHead, _removedCascade, 0, live);
+                    _removedHead = 0;
+                    _removedTail = live;
+                }
+                else
+                {
+                    int n = _removedOwnerId.Length * 2;
+                    Array.Resize(ref _removedOwnerId, n);
+                    Array.Resize(ref _removedOwnerVersion, n);
+                    Array.Resize(ref _removedVersion, n);
+                    Array.Resize(ref _removedFrame, n);
+                    Array.Resize(ref _removedCascade, n);
+                }
+            }
+
+            int slot = _removedTail++;
+            _removedOwnerId[slot] = ownerId;
+            _removedOwnerVersion[slot] = ownerVersion;
+            _removedVersion[slot] = World.NextVersion();
+            _removedFrame[slot] = World.Frame;
+            _removedCascade[slot] = cascade;
+            MaxRemoveVersion = _removedVersion[slot];
+        }
+
+        void TrimRemovals()
+        {
+            ulong frame = World.Frame;
+            while (_removedHead < _removedTail && _removedFrame[_removedHead] + RemovalMaxAge < frame)
+                _removedHead++;
+            if (_removedHead == _removedTail)
+            {
+                _removedHead = 0;
+                _removedTail = 0;
+            }
+        }
         EosObject IStorage.AddObject(EosEntity entity) => Add(entity);
 
         /// <summary>Disposes every component, resets the dense arrays and watermarks, and drains the pool.</summary>
@@ -189,22 +288,46 @@ namespace EOS.Storage
             Array.Clear(_addVersion, 0, count);
             Array.Clear(_markVersion, 0, count);
             Array.Clear(_markFrame, 0, count);
+            Array.Clear(_enableVersion, 0, count);
+            Array.Clear(_disableVersion, 0, count);
+            Array.Clear(_enableCascade, 0, count);
+            Array.Clear(_disableCascade, 0, count);
             Array.Clear(_ready, 0, count);
             Count = 0;
             MaxAddVersion = 0;
             MaxMarkVersion = 0;
+            MaxEnableVersion = 0;
+            MaxDisableVersion = 0;
+            MaxRemoveVersion = 0;
+            _removedHead = 0;
+            _removedTail = 0;
             if (Poolable) _pool.Clear();
         }
 
         /// <summary>Whether the component at the given dense index is ready (awoken, started, enabled).</summary>
         public bool IsReady(int index) => _ready[index];
 
-        /// <summary>Recomputes the ready flag for the entity's component after an enabled/active change.</summary>
-        public void RefreshReady(EosEntity entity)
+        /// <summary>Recomputes the ready flag for the entity's component after an enabled/active change, stamping the <c>[Enabled]</c>/<c>[Disabled]</c> channel on a transition. <paramref name="cascade"/> marks the edge as driven by an entity/parent active change rather than an explicit <c>SetEnabled</c>.</summary>
+        public void RefreshReady(EosEntity entity, bool cascade)
         {
             int i = IndexOf(entity);
             if (i < 0) return;
-            _ready[i] = _data[i] != null && _data[i].IsEnabled;
+            bool was = _ready[i];
+            bool now = _data[i] != null && _data[i].IsEnabled;
+            _ready[i] = now;
+            if (now == was) return;
+            if (now)
+            {
+                _enableVersion[i] = World.NextVersion();
+                _enableCascade[i] = cascade;
+                MaxEnableVersion = _enableVersion[i];
+            }
+            else
+            {
+                _disableVersion[i] = World.NextVersion();
+                _disableCascade[i] = cascade;
+                MaxDisableVersion = _disableVersion[i];
+            }
         }
 
         /// <summary>Stamps the add-version for the entity's component, signalling the <c>[New]</c> channel, and refreshes readiness.</summary>
@@ -240,6 +363,10 @@ namespace EOS.Storage
             Array.Resize(ref _addVersion, n);
             Array.Resize(ref _markVersion, n);
             Array.Resize(ref _markFrame, n);
+            Array.Resize(ref _enableVersion, n);
+            Array.Resize(ref _disableVersion, n);
+            Array.Resize(ref _enableCascade, n);
+            Array.Resize(ref _disableCascade, n);
             Array.Resize(ref _ready, n);
         }
         void EnsureSparse(int id)

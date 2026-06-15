@@ -36,14 +36,12 @@ namespace EOS.Systems
             int entityParamIndex = -1;
             int deltaTimeParamIndex = -1;
 
-            var concreteParams = new List<(int position, Type type, Channel channel, bool optional)>();
-            var interfaceParams = new List<(int position, Type type, Channel channel, bool optional, bool each)>();
+            var concreteParams = new List<(int position, Type type, Channel channel, bool optional, bool cascade)>();
+            var interfaceParams = new List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)>();
 
             foreach (var p in parameters)
             {
-                Channel channel = Channel.None;
-                if (p.GetCustomAttribute<NewAttribute>() != null) channel = Channel.New;
-                else if (p.GetCustomAttribute<BumpedAttribute>() != null) channel = Channel.Bumped;
+                var channel = SystemShape.ChannelOf(p, out bool cascade);
                 bool optional = p.GetCustomAttribute<OptionalAttribute>() != null;
                 bool each = p.GetCustomAttribute<EachAttribute>() != null;
 
@@ -52,9 +50,9 @@ namespace EOS.Systems
                 else if (p.ParameterType == typeof(float))
                     deltaTimeParamIndex = p.Position;
                 else if (p.ParameterType.IsInterface)
-                    interfaceParams.Add((p.Position, p.ParameterType, channel, optional, each));
+                    interfaceParams.Add((p.Position, p.ParameterType, channel, optional, each, cascade));
                 else if (typeof(EosObject).IsAssignableFrom(p.ParameterType))
-                    concreteParams.Add((p.Position, p.ParameterType, channel, optional));
+                    concreteParams.Add((p.Position, p.ParameterType, channel, optional, cascade));
                 else
                 {
                     EosLog.Error($"Unsupported parameter type {p.ParameterType.Name} in {instance.GetType().Name}.{method.Name}", nameof(SystemsRunner));
@@ -239,11 +237,11 @@ namespace EOS.Systems
 
         Action<float, ulong> BuildConcreteQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
-            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional, bool cascade)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods, MethodInfo[] concreteHasMethods,
             MethodInfo[] concreteGetOwners, PropertyInfo[] concreteCountProps,
             IIndexedStorage[] concreteIndexed, bool[] concreteOptional,
-            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
@@ -288,10 +286,10 @@ namespace EOS.Systems
 
         Action<float, ulong> BuildReactiveQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
-            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional, bool cascade)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods, MethodInfo[] concreteHasMethods,
             IIndexedStorage[] concreteIndexed, bool[] concreteOptional,
-            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
@@ -303,6 +301,16 @@ namespace EOS.Systems
             {
                 var driver = concreteIndexed[driverConcrete];
                 Channel driverChannel = concreteParams[driverConcrete].channel;
+                bool driverCascade = concreteParams[driverConcrete].cascade;
+
+                if (driverChannel == Channel.Removed)
+                    return BuildRemovedQuery(instance, method, parameters,
+                        concreteParams, interfaceParams, driver, driverConcrete, driverCascade,
+                        entityParamIndex, deltaTimeParamIndex,
+                        includeStorages, includeHasMethods,
+                        excludeStorages, excludeHasMethods, tagFilter, invoker);
+
+                bool driverRequiresReady = ChannelRequiresReady(driverChannel);
 
                 return (deltaTime, cursor) =>
                 {
@@ -311,8 +319,8 @@ namespace EOS.Systems
                     int count = driver.Count;
                     for (int i = 0; i < count; i++)
                     {
-                        if (!driver.IsReady(i)) continue;
-                        if (ChannelVersionAt(driver, i, driverChannel) <= cursor) continue;
+                        if (driverRequiresReady && !driver.IsReady(i)) continue;
+                        if (!ChannelPasses(driver, i, driverChannel, driverCascade, cursor)) continue;
 
                         var entity = driver.GetOwner(i);
 
@@ -346,6 +354,15 @@ namespace EOS.Systems
                 }
                 Channel driverChannel = driverIface.channel;
                 Type driverType = driverIface.type;
+                bool driverCascade = driverIface.cascade;
+
+                if (driverChannel == Channel.Removed)
+                {
+                    EosLog.Error($"{instance.GetType().Name}.Execute: [Removed] is supported only on a concrete component parameter", nameof(SystemsRunner));
+                    return (_, __) => { };
+                }
+
+                bool driverRequiresReady = ChannelRequiresReady(driverChannel);
 
                 return (deltaTime, cursor) =>
                 {
@@ -363,8 +380,8 @@ namespace EOS.Systems
                         int count = indexed.Count;
                         for (int i = 0; i < count; i++)
                         {
-                            if (!indexed.IsReady(i)) continue;
-                            if (ChannelVersionAt(indexed, i, driverChannel) <= cursor) continue;
+                            if (driverRequiresReady && !indexed.IsReady(i)) continue;
+                            if (!ChannelPasses(indexed, i, driverChannel, driverCascade, cursor)) continue;
 
                             var entity = indexed.GetOwner(i);
                             if (!seen.Add(entity.Id)) continue;
@@ -390,6 +407,52 @@ namespace EOS.Systems
                     }
                 };
             }
+        }
+
+        Action<float, ulong> BuildRemovedQuery(
+            object instance, MethodInfo method, ParameterInfo[] parameters,
+            List<(int position, Type type, Channel channel, bool optional, bool cascade)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)> interfaceParams,
+            IIndexedStorage driver, int driverConcrete, bool driverCascade,
+            int entityParamIndex, int deltaTimeParamIndex,
+            object[] includeStorages, MethodInfo[] includeHasMethods,
+            object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
+            SystemInvoker invoker)
+        {
+            if (concreteParams.Count != 1 || interfaceParams.Count != 0)
+            {
+                EosLog.Error($"{instance.GetType().Name}.Execute: [Removed] must be the only component parameter (EosEntity/float/filters allowed)", nameof(SystemsRunner));
+                return (_, __) => { };
+            }
+
+            int removedPosition = concreteParams[driverConcrete].position;
+            int length = parameters.Length;
+
+            return (deltaTime, cursor) =>
+            {
+                if (driver.MaxRemoveVersion <= cursor) return;
+
+                int count = driver.RemovedCount;
+                for (int i = 0; i < count; i++)
+                {
+                    if (driver.RemovedVersionAt(i) <= cursor) continue;
+                    if (!driverCascade && driver.RemovedCascadeAt(i)) continue;
+
+                    var entity = driver.RemovedOwnerAt(i);
+
+                    if (!CheckIncludeExclude(entity,
+                        includeStorages, includeHasMethods,
+                        excludeStorages, excludeHasMethods)) continue;
+
+                    if (!tagFilter.Matches(entity)) continue;
+
+                    var args = new object[length];
+                    if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+                    if (entityParamIndex != -1) args[entityParamIndex] = entity;
+                    args[removedPosition] = null;
+                    Invoke(invoker, instance, method, args);
+                }
+            };
         }
 
         Action<float, ulong> BuildNoComponentQuery(
@@ -432,7 +495,7 @@ namespace EOS.Systems
 
         Action<float, ulong> BuildInterfaceOnlyQuery(
             object instance, MethodInfo method, ParameterInfo[] parameters,
-            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)> interfaceParams,
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
@@ -492,15 +555,36 @@ namespace EOS.Systems
         }
 
 
-        static ulong ChannelVersionAt(IIndexedStorage storage, int index, Channel channel)
-            => channel == Channel.Bumped ? storage.MarkVersionAt(index) : storage.AddVersionAt(index);
+        static ulong ChannelVersionAt(IIndexedStorage storage, int index, Channel channel) => channel switch
+        {
+            Channel.Bumped => storage.MarkVersionAt(index),
+            Channel.Enabled => storage.EnableVersionAt(index),
+            Channel.Disabled => storage.DisableVersionAt(index),
+            _ => storage.AddVersionAt(index)
+        };
 
-        static ulong ChannelMax(IIndexedStorage storage, Channel channel)
-            => channel == Channel.Bumped ? storage.MaxMarkVersion : storage.MaxAddVersion;
+        static ulong ChannelMax(IIndexedStorage storage, Channel channel) => channel switch
+        {
+            Channel.Bumped => storage.MaxMarkVersion,
+            Channel.Enabled => storage.MaxEnableVersion,
+            Channel.Disabled => storage.MaxDisableVersion,
+            _ => storage.MaxAddVersion
+        };
+
+        static bool ChannelRequiresReady(Channel channel) => channel != Channel.Disabled;
+
+        static bool ChannelPasses(IIndexedStorage storage, int index, Channel channel, bool includeCascade, ulong cursor)
+        {
+            if (ChannelVersionAt(storage, index, channel) <= cursor) return false;
+            if (includeCascade) return true;
+            if (channel == Channel.Enabled) return !storage.EnableCascadeAt(index);
+            if (channel == Channel.Disabled) return !storage.DisableCascadeAt(index);
+            return true;
+        }
 
         bool ReactiveConcreteMatch(
             EosEntity entity,
-            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional, bool cascade)> concreteParams,
             IIndexedStorage[] concreteIndexed, MethodInfo[] concreteHasMethods, object[] concreteStorages,
             int driverIndex, ulong cursor)
         {
@@ -510,15 +594,22 @@ namespace EOS.Systems
                 var channel = concreteParams[j].channel;
                 bool optional = concreteParams[j].optional;
 
+                if (channel == Channel.Removed)
+                {
+                    if (optional) continue;
+                    return false;
+                }
+
                 if (channel != Channel.None)
                 {
+                    bool cascade = concreteParams[j].cascade;
                     int idx = concreteIndexed[j].IndexOf(entity);
-                    if (idx < 0 || !concreteIndexed[j].IsReady(idx))
+                    if (idx < 0 || (ChannelRequiresReady(channel) && !concreteIndexed[j].IsReady(idx)))
                     {
                         if (optional) continue;
                         return false;
                     }
-                    if (ChannelVersionAt(concreteIndexed[j], idx, channel) <= cursor)
+                    if (!ChannelPasses(concreteIndexed[j], idx, channel, cascade, cursor))
                     {
                         if (optional) continue;
                         return false;
@@ -537,7 +628,7 @@ namespace EOS.Systems
 
         List<object[]> ResolveInterfaceCombinations(
             EosEntity entity,
-            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams)
+            List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)> interfaceParams)
         {
             int n = interfaceParams.Count;
             if (n == 0) return _emptyCombo;
@@ -569,7 +660,7 @@ namespace EOS.Systems
 
         List<object[]> ResolveInterfaceCombinationsReactive(
             EosEntity entity,
-            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)> interfaceParams,
             ulong cursor)
         {
             int n = interfaceParams.Count;
@@ -582,7 +673,7 @@ namespace EOS.Systems
                 if (p.each)
                 {
                     var list = new List<object>();
-                    CollectInterfaceComponentsReactive(entity, p.type, p.channel, cursor, list);
+                    CollectInterfaceComponentsReactive(entity, p.type, p.channel, p.cascade, cursor, list);
                     if (list.Count == 0)
                     {
                         if (!p.optional) return null;
@@ -592,7 +683,7 @@ namespace EOS.Systems
                 }
                 else
                 {
-                    var component = FindInterfaceComponentReactive(entity, p.type, p.channel, cursor);
+                    var component = FindInterfaceComponentReactive(entity, p.type, p.channel, p.cascade, cursor);
                     if (component == null && !p.optional) return null;
                     perParam[j] = new List<object>(1) { component };
                 }
@@ -639,7 +730,7 @@ namespace EOS.Systems
         }
 
         void CollectInterfaceComponentsReactive(
-            EosEntity entity, Type interfaceType, Channel channel, ulong cursor, List<object> into)
+            EosEntity entity, Type interfaceType, Channel channel, bool includeCascade, ulong cursor, List<object> into)
         {
             var storages = World.ObjectsStorages.GetByInterface(interfaceType);
             if (storages == null) return;
@@ -648,12 +739,13 @@ namespace EOS.Systems
             {
                 var indexed = storages[s] as IIndexedStorage;
                 if (indexed == null) continue;
+                if (channel == Channel.Removed) continue;
                 int idx = indexed.IndexOf(entity);
                 if (idx < 0) continue;
-                if (!indexed.IsReady(idx)) continue;
+                if (ChannelRequiresReady(channel) && !indexed.IsReady(idx)) continue;
                 var component = indexed.GetAt(idx);
                 if (component == null) continue;
-                if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor) continue;
+                if (channel != Channel.None && !ChannelPasses(indexed, idx, channel, includeCascade, cursor)) continue;
                 into.Add(component);
             }
         }
@@ -673,7 +765,7 @@ namespace EOS.Systems
             return null;
         }
 
-        object FindInterfaceComponentReactive(EosEntity entity, Type interfaceType, Channel channel, ulong cursor)
+        object FindInterfaceComponentReactive(EosEntity entity, Type interfaceType, Channel channel, bool includeCascade, ulong cursor)
         {
             var storages = World.ObjectsStorages.GetByInterface(interfaceType);
             if (storages == null) return null;
@@ -682,12 +774,13 @@ namespace EOS.Systems
             {
                 var indexed = storages[s] as IIndexedStorage;
                 if (indexed == null) continue;
+                if (channel == Channel.Removed) continue;
                 int idx = indexed.IndexOf(entity);
                 if (idx < 0) continue;
-                if (!indexed.IsReady(idx)) continue;
+                if (ChannelRequiresReady(channel) && !indexed.IsReady(idx)) continue;
                 var component = indexed.GetAt(idx);
                 if (component == null) continue;
-                if (channel != Channel.None && ChannelVersionAt(indexed, idx, channel) <= cursor) continue;
+                if (channel != Channel.None && !ChannelPasses(indexed, idx, channel, includeCascade, cursor)) continue;
                 return component;
             }
             return null;
@@ -696,10 +789,10 @@ namespace EOS.Systems
         object[] BuildArgs(
             ParameterInfo[] parameters, EosEntity entity, float deltaTime,
             int deltaTimeParamIndex, int entityParamIndex,
-            List<(int position, Type type, Channel channel, bool optional)> concreteParams,
+            List<(int position, Type type, Channel channel, bool optional, bool cascade)> concreteParams,
             object[] concreteStorages, MethodInfo[] concreteGetMethods,
             IIndexedStorage[] concreteIndexed, int pivot, int pivotIndex,
-            List<(int position, Type type, Channel channel, bool optional, bool each)> interfaceParams,
+            List<(int position, Type type, Channel channel, bool optional, bool each, bool cascade)> interfaceParams,
             object[] ifaceComponents, ulong cursor)
         {
             var args = new object[parameters.Length];
@@ -711,7 +804,7 @@ namespace EOS.Systems
                 if (j == pivot && pivotIndex >= 0)
                     args[concreteParams[j].position] = concreteIndexed[pivot].GetAt(pivotIndex);
                 else if (concreteParams[j].optional)
-                    args[concreteParams[j].position] = ResolveOptional(concreteIndexed[j], entity, concreteParams[j].channel, cursor);
+                    args[concreteParams[j].position] = ResolveOptional(concreteIndexed[j], entity, concreteParams[j].channel, concreteParams[j].cascade, cursor);
                 else
                     args[concreteParams[j].position] = concreteGetMethods[j].Invoke(concreteStorages[j], new object[] { entity });
             }
@@ -722,11 +815,13 @@ namespace EOS.Systems
             return args;
         }
 
-        static object ResolveOptional(IIndexedStorage storage, EosEntity entity, Channel channel, ulong cursor)
+        static object ResolveOptional(IIndexedStorage storage, EosEntity entity, Channel channel, bool includeCascade, ulong cursor)
         {
+            if (channel == Channel.Removed) return null;
             int idx = storage.IndexOf(entity);
-            if (idx < 0 || !storage.IsReady(idx)) return null;
-            if (channel != Channel.None && ChannelVersionAt(storage, idx, channel) <= cursor) return null;
+            if (idx < 0) return null;
+            if (ChannelRequiresReady(channel) && !storage.IsReady(idx)) return null;
+            if (channel != Channel.None && !ChannelPasses(storage, idx, channel, includeCascade, cursor)) return null;
             return storage.GetAt(idx);
         }
 

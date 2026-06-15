@@ -317,15 +317,46 @@ namespace EOS.CodeGen
         {
             var dp = concrete.First(c => c.index == driverConcrete).p;
             string sd = "s" + driverConcrete;
+
+            if (dp.Channel == Channel.Removed)
+            {
+                EmitRemovedDriver(sb, method, parameters, concreteByPosition, ifaceByPosition, driverConcrete, dp, sd);
+                return;
+            }
+
             sb.Append("                if (").Append(MaxExpr(sd, dp)).Append(" <= cursor) return;\n");
             sb.Append("                int count = ").Append(sd).Append(".Count;\n");
             sb.Append("                for (int i = 0; i < count; i++)\n");
             sb.Append("                {\n");
-            sb.Append("                    if (!").Append(sd).Append(".IsReady(i)) continue;\n");
+            string ready = ReadySkip(sd, "i", dp);
+            if (ready != null)
+                sb.Append("                    if (!").Append(ready).Append(") continue;\n");
             sb.Append("                    if (").Append(VerExpr(sd, "i", dp)).Append(" <= cursor) continue;\n");
+            EmitCascadeGate(sb, "                    ", sd, "i", dp);
             sb.Append("                    var e = ").Append(sd).Append(".GetOwner(i);\n");
             sb.Append("                    var c").Append(driverConcrete).Append(" = ").Append(sd).Append(".At(i);\n");
             EmitReactivePerEntity(sb, "                    ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition, driverConcrete);
+            sb.Append("                }\n");
+        }
+
+        static void EmitRemovedDriver(
+            StringBuilder sb, MethodInfo method, List<QueryParam> parameters,
+            Dictionary<int, int> concreteByPosition, Dictionary<int, int> ifaceByPosition,
+            int driverConcrete, QueryParam dp, string sd)
+        {
+            sb.Append("                if (").Append(sd).Append(".MaxRemoveVersion <= cursor) return;\n");
+            sb.Append("                int count = ").Append(sd).Append(".RemovedCount;\n");
+            sb.Append("                for (int i = 0; i < count; i++)\n");
+            sb.Append("                {\n");
+            sb.Append("                    if (").Append(sd).Append(".RemovedVersionAt(i) <= cursor) continue;\n");
+            if (!dp.IncludeCascade)
+                sb.Append("                    if (").Append(sd).Append(".RemovedCascadeAt(i)) continue;\n");
+            sb.Append("                    var e = ").Append(sd).Append(".RemovedOwnerAt(i);\n");
+            sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.IncludeMatch(include, e)) continue;\n");
+            sb.Append("                    if (!global::EOS.CodeGen.GeneratedQuery.ExcludeMatch(exclude, e)) continue;\n");
+            sb.Append("                    if (tagMatch != null && !tagMatch(e)) continue;\n");
+            sb.Append("                    ").Append(CSharpName(dp.Type)).Append(" c").Append(driverConcrete).Append(" = null;\n");
+            sb.Append("                    self.").Append(method.Name).Append('(').Append(CallArguments(parameters, concreteByPosition, ifaceByPosition)).Append(");\n");
             sb.Append("                }\n");
         }
 
@@ -344,8 +375,11 @@ namespace EOS.CodeGen
             sb.Append("                    int dcount = drv.Count;\n");
             sb.Append("                    for (int i = 0; i < dcount; i++)\n");
             sb.Append("                    {\n");
-            sb.Append("                        if (!drv.IsReady(i)) continue;\n");
+            string ready = ReadySkip("drv", "i", dp);
+            if (ready != null)
+                sb.Append("                        if (!").Append(ready).Append(") continue;\n");
             sb.Append("                        if (").Append(VerExpr("drv", "i", dp)).Append(" <= cursor) continue;\n");
+            EmitCascadeGate(sb, "                        ", "drv", "i", dp);
             sb.Append("                        var e = drv.GetOwner(i);\n");
             sb.Append("                        if (!seen.Add(e.Id)) continue;\n");
             EmitReactivePerEntity(sb, "                        ", method, parameters, concrete, concreteByPosition, ifaces, ifaceByPosition, -1);
@@ -368,13 +402,26 @@ namespace EOS.CodeGen
                     if (cp.Optional)
                     {
                         sb.Append(indent).Append(CSharpName(cp.Type)).Append(" c").Append(idx).Append(" = null;\n");
-                        sb.Append(indent).Append("if (k").Append(idx).Append(" >= 0 && ").Append(s).Append(".IsReady(k").Append(idx).Append(") && ").Append(VerExpr(s, "k" + idx, cp)).Append(" > cursor)\n");
+                        sb.Append(indent).Append("if (k").Append(idx).Append(" >= 0");
+                        if (cp.Channel != Channel.Disabled)
+                            sb.Append(" && ").Append(s).Append(".IsReady(k").Append(idx).Append(")");
+                        sb.Append(" && ").Append(VerExpr(s, "k" + idx, cp)).Append(" > cursor");
+                        if (!cp.IncludeCascade && cp.Channel == Channel.Enabled)
+                            sb.Append(" && !").Append(s).Append(".EnableCascadeAt(k").Append(idx).Append(")");
+                        else if (!cp.IncludeCascade && cp.Channel == Channel.Disabled)
+                            sb.Append(" && !").Append(s).Append(".DisableCascadeAt(k").Append(idx).Append(")");
+                        sb.Append(")\n");
                         sb.Append(indent).Append("    c").Append(idx).Append(" = ").Append(s).Append(".At(k").Append(idx).Append(");\n");
                     }
                     else
                     {
-                        sb.Append(indent).Append("if (k").Append(idx).Append(" < 0 || !").Append(s).Append(".IsReady(k").Append(idx).Append(")) continue;\n");
+                        string readyExpr = ReadySkip(s, "k" + idx, cp);
+                        if (readyExpr != null)
+                            sb.Append(indent).Append("if (k").Append(idx).Append(" < 0 || !").Append(readyExpr).Append(") continue;\n");
+                        else
+                            sb.Append(indent).Append("if (k").Append(idx).Append(" < 0) continue;\n");
                         sb.Append(indent).Append("if (").Append(VerExpr(s, "k" + idx, cp)).Append(" <= cursor) continue;\n");
+                        EmitCascadeGate(sb, indent, s, "k" + idx, cp);
                         sb.Append(indent).Append("var c").Append(idx).Append(" = ").Append(s).Append(".At(k").Append(idx).Append(");\n");
                     }
                 }
@@ -416,9 +463,16 @@ namespace EOS.CodeGen
                 sb.Append(indent).Append("{\n");
                 sb.Append(inner).Append("var st").Append(idx).Append(" = impl").Append(idx).Append("[j").Append(idx).Append("];\n");
                 sb.Append(inner).Append("int ik").Append(idx).Append(" = st").Append(idx).Append(".IndexOf(e);\n");
-                sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0 || !st").Append(idx).Append(".IsReady(ik").Append(idx).Append(")) continue;\n");
+                string ready = ReadySkip("st" + idx, "ik" + idx, f.Param);
+                if (ready != null)
+                    sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0 || !").Append(ready).Append(") continue;\n");
+                else
+                    sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0) continue;\n");
                 if (f.Param.Reactive)
+                {
                     sb.Append(inner).Append("if (").Append(VerExpr("st" + idx, "ik" + idx, f.Param)).Append(" <= cursor) continue;\n");
+                    EmitCascadeGate(sb, inner, "st" + idx, "ik" + idx, f.Param);
+                }
                 if (f.Param.Optional)
                     sb.Append(inner).Append("any").Append(idx).Append(" = true;\n");
                 sb.Append(inner).Append("var v").Append(idx).Append(" = (").Append(type).Append(")st").Append(idx).Append(".GetAt(ik").Append(idx).Append(");\n");
@@ -441,9 +495,16 @@ namespace EOS.CodeGen
                 sb.Append(indent).Append("{\n");
                 sb.Append(inner).Append("var st").Append(idx).Append(" = impl").Append(idx).Append("[j").Append(idx).Append("];\n");
                 sb.Append(inner).Append("int ik").Append(idx).Append(" = st").Append(idx).Append(".IndexOf(e);\n");
-                sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0 || !st").Append(idx).Append(".IsReady(ik").Append(idx).Append(")) continue;\n");
+                string ready = ReadySkip("st" + idx, "ik" + idx, f.Param);
+                if (ready != null)
+                    sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0 || !").Append(ready).Append(") continue;\n");
+                else
+                    sb.Append(inner).Append("if (ik").Append(idx).Append(" < 0) continue;\n");
                 if (f.Param.Reactive)
+                {
                     sb.Append(inner).Append("if (").Append(VerExpr("st" + idx, "ik" + idx, f.Param)).Append(" <= cursor) continue;\n");
+                    EmitCascadeGate(sb, inner, "st" + idx, "ik" + idx, f.Param);
+                }
                 sb.Append(inner).Append("v").Append(idx).Append(" = (").Append(type).Append(")st").Append(idx).Append(".GetAt(ik").Append(idx).Append("); break;\n");
                 sb.Append(indent).Append("}\n");
 
@@ -461,11 +522,33 @@ namespace EOS.CodeGen
             }
         }
 
-        static string MaxExpr(string storage, QueryParam p)
-            => storage + (p.Bumped ? ".MaxMarkVersion" : ".MaxAddVersion");
+        static string MaxExpr(string storage, QueryParam p) => p.Channel switch
+        {
+            Channel.Bumped => storage + ".MaxMarkVersion",
+            Channel.Enabled => storage + ".MaxEnableVersion",
+            Channel.Disabled => storage + ".MaxDisableVersion",
+            _ => storage + ".MaxAddVersion"
+        };
 
-        static string VerExpr(string storage, string indexExpr, QueryParam p)
-            => storage + (p.Bumped ? ".MarkVersionAt(" : ".AddVersionAt(") + indexExpr + ")";
+        static string VerExpr(string storage, string indexExpr, QueryParam p) => p.Channel switch
+        {
+            Channel.Bumped => storage + ".MarkVersionAt(" + indexExpr + ")",
+            Channel.Enabled => storage + ".EnableVersionAt(" + indexExpr + ")",
+            Channel.Disabled => storage + ".DisableVersionAt(" + indexExpr + ")",
+            _ => storage + ".AddVersionAt(" + indexExpr + ")"
+        };
+
+        static string ReadySkip(string storage, string indexExpr, QueryParam p)
+            => p.Channel == Channel.Disabled ? null : storage + ".IsReady(" + indexExpr + ")";
+
+        static void EmitCascadeGate(StringBuilder sb, string indent, string storage, string indexExpr, QueryParam p)
+        {
+            if (p.IncludeCascade) return;
+            if (p.Channel == Channel.Enabled)
+                sb.Append(indent).Append("if (").Append(storage).Append(".EnableCascadeAt(").Append(indexExpr).Append(")) continue;\n");
+            else if (p.Channel == Channel.Disabled)
+                sb.Append(indent).Append("if (").Append(storage).Append(".DisableCascadeAt(").Append(indexExpr).Append(")) continue;\n");
+        }
 
         static bool CanTypeEvent(MethodInfo method)
         {

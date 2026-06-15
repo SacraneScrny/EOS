@@ -107,7 +107,7 @@ namespace EOS.Storage
         internal void RefreshReady(EosObject obj)
         {
             if (_map.TryGetValue(obj.GetType(), out var storage))
-                (storage as IIndexedStorage)?.RefreshReady(obj.Entity);
+                (storage as IIndexedStorage)?.RefreshReady(obj.Entity, false);
         }
         internal void RefreshReadyAll(EosEntity entity)
         {
@@ -116,7 +116,7 @@ namespace EOS.Storage
             var list = _entityStorages[id];
             if (list == null) return;
             for (int i = 0; i < list.Count; i++)
-                (list[i] as IIndexedStorage)?.RefreshReady(entity);
+                (list[i] as IIndexedStorage)?.RefreshReady(entity, true);
         }
 
         internal void DestroyEntity(EosEntity entity)
