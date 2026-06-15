@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & tooling
 
-Pure C# class library — no `.csproj`, no solution file, no test runner. There are no build or lint commands to run. Validate changes by reading the code carefully; compilation errors only surface when the consumer project builds. The library has no external dependencies and no `UnityEngine` references — engine integration lives in a separate consumer assembly (EOS.Unity) that plugs in through the seams below. The core and the Unity bridge are compiled into the same Unity assembly (`Assembly-CSharp`, no asmdefs), so `internal` members of the core are visible to the bridge — keep that in mind before widening any `internal` API to `public`.
+Pure C# class library — no `.csproj`, no solution file, no test runner. There are no build or lint commands to run. Validate changes by reading the code carefully; compilation errors only surface when the consumer project builds. The library has no external dependencies and no `UnityEngine` references — engine integration lives in a separate consumer assembly (EOS.Unity) that plugs in through the seams below. The core ships its own `EOS.asmdef` (assembly `EOS`, `noEngineReferences: true`); the Unity bridge is a separate assembly (`EOS.Unity`). Because they no longer share `Assembly-CSharp`, the core grants the bridge access to its `internal` surface with `[assembly: InternalsVisibleTo("EOS.Unity")]` (`AssemblyInfo.cs`) — so the existing `internal` boundary still holds against arbitrary third-party code. Keep that in mind before widening any `internal` API to `public`: the bridge already sees internals, so a member only needs to be `public` if genuinely public consumers require it.
 
 ## Code style
 
