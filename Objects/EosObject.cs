@@ -41,7 +41,7 @@ namespace EOS.Objects
         {
             Entity = entity;
             HasEntity = true;
-            Entity.World.Objects.RegisterObject(this);
+            Entity._internal_world.Objects.RegisterObject(this);
         }
 
         internal void ResetForReuse()
@@ -147,7 +147,7 @@ namespace EOS.Objects
                 EosLog.Error($"Exception in OnDispose of {this}: {e}", nameof(EosObject));
             }
             
-            Entity.World.Objects.UnregisterObject(this);
+            Entity._internal_world.Objects.UnregisterObject(this);
         }
         /// <summary>Override for teardown; reset stale data fields here for pooled components, since reused instances re-run the full lifecycle.</summary>
         protected virtual void OnDispose() { }
@@ -164,13 +164,13 @@ namespace EOS.Objects
         protected bool Remove<T>() where T : EosObject, new() => Entity.Remove<T>();
 
         /// <summary>The owning world's service locator.</summary>
-        protected IServiceLocator Services => Entity.World.Services;
+        protected IServiceLocator Services => Entity._internal_world.Services;
 
         /// <summary>Signals the <c>[Bumped]</c> reactive channel for this component (deduped to once per frame).</summary>
         protected void Bump()
         {
             if (HasEntity && Entity.IsValid)
-                Entity.World.ObjectsStorages.Bump(this);
+                Entity._internal_world.ObjectsStorages.Bump(this);
         }
 
         /// <summary>Sets the local enabled flag and refreshes readiness; affects whether queries and updates visit this component.</summary>
@@ -179,7 +179,7 @@ namespace EOS.Objects
             if (_enabled == value) return;
             _enabled = value;
             if (HasEntity && Entity.IsValid)
-                Entity.World.ObjectsStorages.RefreshReady(this);
+                Entity._internal_world.ObjectsStorages.RefreshReady(this);
         }
         /// <summary>Enables the component (shorthand for <c>SetEnabled(true)</c>).</summary>
         public void Enable() => SetEnabled(true);

@@ -37,13 +37,13 @@ namespace EOS.Hierarchy
         /// <summary>Reparents <paramref name="child"/> under <paramref name="parent"/> (null parent detaches); rejects cycles, self-parenting, cross-world and stale handles with an error log, and emits <see cref="ParentChanged"/>.</summary>
         public bool SetParent(EosEntity child, EosEntity parent)
         {
-            if (child.World != World || !child.IsValid)
+            if (child._internal_world != World || !child.IsValid)
             {
                 EosLog.Error("SetParent: child entity is invalid", nameof(HierarchyContainer));
                 return false;
             }
-            if (parent.World == null) return Detach(child);
-            if (parent.World != World)
+            if (parent._internal_world == null) return Detach(child);
+            if (parent._internal_world != World)
             {
                 EosLog.Error("SetParent: parent belongs to another world", nameof(HierarchyContainer));
                 return false;
@@ -80,19 +80,19 @@ namespace EOS.Hierarchy
         /// <summary>Returns the entity's parent, or <see cref="EosEntity.Null"/> if it is a root or invalid.</summary>
         public EosEntity GetParent(EosEntity entity)
         {
-            if (entity.World != World || !entity.IsValid) return EosEntity.Null;
+            if (entity._internal_world != World || !entity.IsValid) return EosEntity.Null;
             int id = entity.Id;
             return id < _capacity ? ParentOf(id) : EosEntity.Null;
         }
 
         /// <summary>True when the entity has a parent.</summary>
         public bool HasParent(EosEntity entity)
-            => entity.World == World && entity.IsValid && entity.Id < _capacity && _parents[entity.Id] >= 0;
+            => entity._internal_world == World && entity.IsValid && entity.Id < _capacity && _parents[entity.Id] >= 0;
 
         /// <summary>Returns the entity's subtree root (itself if it is a root) via a cached O(1) lookup.</summary>
         public EosEntity GetRoot(EosEntity entity)
         {
-            if (entity.World != World || !entity.IsValid) return EosEntity.Null;
+            if (entity._internal_world != World || !entity.IsValid) return EosEntity.Null;
             int id = entity.Id;
             if (id >= _capacity) return entity;
             return World.Entities.EntityFromId(_root[id]);
@@ -101,7 +101,7 @@ namespace EOS.Hierarchy
         /// <summary>True when <paramref name="ancestor"/> appears anywhere above <paramref name="entity"/> in the hierarchy.</summary>
         public bool IsDescendantOf(EosEntity entity, EosEntity ancestor)
         {
-            if (entity.World != World || ancestor.World != World) return false;
+            if (entity._internal_world != World || ancestor._internal_world != World) return false;
             if (!entity.IsValid || !ancestor.IsValid) return false;
             if (entity.Id >= _capacity) return false;
             int current = _parents[entity.Id];
@@ -115,11 +115,11 @@ namespace EOS.Hierarchy
 
         /// <summary>Number of direct children of the entity.</summary>
         public int GetChildCount(EosEntity entity)
-            => entity.World == World && entity.IsValid && entity.Id < _capacity ? _childCount[entity.Id] : 0;
+            => entity._internal_world == World && entity.IsValid && entity.Id < _capacity ? _childCount[entity.Id] : 0;
 
         /// <summary>Returns an alloc-free struct enumerator over the entity's direct children (order unspecified).</summary>
         public ChildList ChildrenOf(EosEntity entity)
-            => entity.World == World && entity.IsValid && entity.Id < _capacity
+            => entity._internal_world == World && entity.IsValid && entity.Id < _capacity
                 ? new ChildList(this, _firstChild[entity.Id])
                 : new ChildList(this, -1);
 
@@ -127,7 +127,7 @@ namespace EOS.Hierarchy
         public int Collect(EosEntity entity, List<EosEntity> into, bool recursive = false)
         {
             if (into == null) return 0;
-            if (entity.World != World || !entity.IsValid || entity.Id >= _capacity) return 0;
+            if (entity._internal_world != World || !entity.IsValid || entity.Id >= _capacity) return 0;
 
             int before = into.Count;
             AppendChildren(entity.Id, into);
@@ -146,7 +146,7 @@ namespace EOS.Hierarchy
         /// <summary>Detaches all direct children of the entity, making each a root.</summary>
         public void DetachChildren(EosEntity entity)
         {
-            if (entity.World != World || !entity.IsValid || entity.Id >= _capacity) return;
+            if (entity._internal_world != World || !entity.IsValid || entity.Id >= _capacity) return;
             int id = entity.Id;
             while (_firstChild[id] >= 0)
                 Detach(World.Entities.EntityFromId(_firstChild[id]));

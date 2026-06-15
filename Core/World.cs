@@ -54,6 +54,19 @@ namespace EOS.Core
         SystemGroups SystemGroups { get; }
         /// <summary>Runs Awake/Start on waiting objects before systems each Update.</summary>
         InitializeSystemRunner InitializeSystems { get; }
+        /// <summary>Per-type event channel store driving <c>EventExecute</c> consumers.</summary>
+        EventsContainer Events { get; }
+
+        /// <summary>Emits a struct event into its channel's staging buffer; safe mid-iteration, surfaces one tick later.</summary>
+        void Event<T>(in T e) where T : struct;
+
+        /// <summary>Typed struct blackboard for this world; <c>Get</c>/<c>TryGet</c>/<c>Has</c>/<c>Set</c>/<c>Clear</c>.</summary>
+        IWorldContext Context { get; }
+
+        /// <summary>Read-only service locator for this world (<c>Get</c>/<c>TryGet</c>/<c>Has</c>).</summary>
+        IServiceLocator Services { get; }
+        /// <summary>Service registry for this world; register/unregister before driving (rejected during iteration).</summary>
+        IServiceRegistry ServiceRegistry { get; }
 
         /// <summary>Command buffer executed at the start of <c>Update</c> only.</summary>
         IEntityCommandScheduler BeforeAll { get; }

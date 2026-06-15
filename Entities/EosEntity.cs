@@ -14,24 +14,26 @@ namespace EOS.Entities
         public readonly int Id;
         /// <summary>Version stamp incremented on destroy; mismatch marks this handle stale.</summary>
         public readonly ushort Version;
-        internal readonly World World;
+        
+        internal readonly World _internal_world;
+        public IReadOnlyWorld World => _internal_world;
 
         /// <summary>The entity's name, resolved from the world; empty if the handle is detached or invalid.</summary>
-        public string Name => World != null ? World.Entities.GetName(this) : string.Empty;
+        public string Name => _internal_world != null ? _internal_world.Entities.GetName(this) : string.Empty;
 
         /// <summary>True while this handle refers to a live entity (exists and version matches).</summary>
-        public bool IsValid => World != null && World.Entities.IsValid(this);
+        public bool IsValid => _internal_world != null && _internal_world.Entities.IsValid(this);
         /// <summary>Effective active state: this entity's own flag AND every ancestor's.</summary>
-        public bool IsActive => World != null && World.Entities.IsActive(this);
+        public bool IsActive => _internal_world != null && _internal_world.Entities.IsActive(this);
         /// <summary>This entity's own active flag alone, independent of ancestors.</summary>
-        public bool IsActiveSelf => World != null && World.Entities.IsActiveSelf(this);
+        public bool IsActiveSelf => _internal_world != null && _internal_world.Entities.IsActiveSelf(this);
 
         /// <summary>Creates a new entity in <paramref name="world"/> (inactive by default; blank names normalize to "Entity").</summary>
         public EosEntity(World world, string name = "", bool active = false, bool isSerializable = true)
         {
             if (string.IsNullOrWhiteSpace(name))
                 name = "Entity";
-            World = world;
+            _internal_world = world;
 
             var created = world.Entities.Create(name, active, isSerializable);
             Id = created.Id;
@@ -41,21 +43,21 @@ namespace EOS.Entities
         {
             Id = id;
             Version = version;
-            World = world;
+            _internal_world = world;
         }
 
         /// <summary>Destroys this entity (and cascades to its children).</summary>
-        public void Destroy() => World.Entities.Destroy(this);
+        public void Destroy() => _internal_world.Entities.Destroy(this);
 
         /// <summary>Equality over id, version and world id.</summary>
-        public static bool operator ==(EosEntity a, EosEntity b) => a.Id == b.Id && a.Version == b.Version && (a.World?.Id ?? -1) == (b.World?.Id ?? -1);
+        public static bool operator ==(EosEntity a, EosEntity b) => a.Id == b.Id && a.Version == b.Version && (a._internal_world?.Id ?? -1) == (b._internal_world?.Id ?? -1);
         /// <summary>Inequality over id, version and world id.</summary>
         public static bool operator !=(EosEntity a, EosEntity b) => !(a == b);
         /// <summary>True when id, version and world id all match.</summary>
-        public bool Equals(EosEntity other) => Id == other.Id && Version == other.Version && (World?.Id ?? -1) == (other.World?.Id ?? -1);
+        public bool Equals(EosEntity other) => Id == other.Id && Version == other.Version && (_internal_world?.Id ?? -1) == (other._internal_world?.Id ?? -1);
         /// <summary>True when <paramref name="obj"/> is an <see cref="EosEntity"/> equal to this one.</summary>
         public override bool Equals(object obj) => obj is EosEntity other && Equals(other);
         /// <summary>Hash combining id, version and world id.</summary>
-        public override int GetHashCode() => HashCode.Combine(Id, Version, World?.Id ?? -1);
+        public override int GetHashCode() => HashCode.Combine(Id, Version, _internal_world?.Id ?? -1);
     }
 }

@@ -39,7 +39,7 @@ namespace EOS.Diagnostics
         public static string DumpEntity(EosEntity entity)
         {
             var sb = new StringBuilder();
-            AppendEntity(sb, entity, entity.World, new List<string>());
+            AppendEntity(sb, entity, entity._internal_world, new List<string>());
             return sb.ToString();
         }
 
