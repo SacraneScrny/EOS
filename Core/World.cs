@@ -120,6 +120,11 @@ namespace EOS.Core
         public ulong Frame => _frame;
         internal ulong NextFrame() => ++_frame;
 
+        ulong _reactiveRetentionFrames = 16;
+        /// <summary>Frame window that age-trimmed reactive state (<c>[Removed]</c> log, event channels) is kept; computed from the longest <c>[Delay]</c>/<c>[DelayFrame]</c> at init so a sleeping system never misses those edges. Never below 16.</summary>
+        public ulong ReactiveRetentionFrames => _reactiveRetentionFrames;
+        internal void SetReactiveRetentionFrames(ulong frames) => _reactiveRetentionFrames = frames < 16 ? 16 : frames;
+
         #region Structural guard
         int _iterationDepth;
 

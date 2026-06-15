@@ -17,8 +17,6 @@ namespace EOS.Storage
         static readonly bool Poolable = typeof(IPoolableObject).IsAssignableFrom(typeof(T));
         readonly Stack<T> _pool = typeof(IPoolableObject).IsAssignableFrom(typeof(T)) ? new Stack<T>() : null;
 
-        const ulong RemovalMaxAge = 16;
-
         T[] _data = new T[InitialCapacity];
         int[] _owners = new int[InitialCapacity];
         ushort[] _ownerVersions = new ushort[InitialCapacity];
@@ -262,7 +260,8 @@ namespace EOS.Storage
         void TrimRemovals()
         {
             ulong frame = World.Frame;
-            while (_removedHead < _removedTail && _removedFrame[_removedHead] + RemovalMaxAge < frame)
+            ulong maxAge = World.ReactiveRetentionFrames;
+            while (_removedHead < _removedTail && _removedFrame[_removedHead] + maxAge < frame)
                 _removedHead++;
             if (_removedHead == _removedTail)
             {

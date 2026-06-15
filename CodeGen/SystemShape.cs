@@ -194,6 +194,7 @@ namespace EOS.CodeGen
         public static bool CanTypeBody(MethodInfo method)
         {
             if (method.Name != "Execute") return false;
+            if (method.GetCustomAttribute<BudgetAttribute>() != null) return false;
 
             bool anyMandatoryConcrete = false;
             bool anyMandatoryInterface = false;

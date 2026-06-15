@@ -60,7 +60,7 @@ namespace EOS.Events
         {
             foreach (var channel in _channels.Values)
             {
-                try { channel.Trim(World.Frame, MaxAge); }
+                try { channel.Trim(World.Frame, World.ReactiveRetentionFrames); }
                 catch (Exception ex) { EosLog.Error($"Trim failed: {ex.Message}", nameof(EventsContainer)); }
             }
         }

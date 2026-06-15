@@ -30,7 +30,9 @@ namespace EOS.Systems
             else method.Invoke(instance, args);
         }
 
-        (Action<float, ulong> body, bool reactive) BuildQuery(object instance, MethodInfo method, SystemInvoker invoker)
+        static readonly Comparison<(int index, ulong version)> ByVersion = (a, b) => a.version.CompareTo(b.version);
+
+        (Action<float, ulong> body, bool reactive) BuildQuery(object instance, MethodInfo method, SystemInvoker invoker, int budget, ReactiveBudgetState budgetState)
         {
             var parameters = method.GetParameters();
             int entityParamIndex = -1;
@@ -102,19 +104,19 @@ namespace EOS.Systems
                     interfaceParams,
                     entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods, tagFilter, invoker), true);
+                    excludeStorages, excludeHasMethods, tagFilter, invoker, budget, budgetState), true);
 
             if (concreteParams.Count == 0 && interfaceParams.Count == 0)
                 return (BuildNoComponentQuery(instance, method, parameters,
                     entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods, tagFilter, invoker), false);
+                    excludeStorages, excludeHasMethods, tagFilter, invoker, budget), false);
 
             if (concreteParams.Count == 0)
                 return (BuildInterfaceOnlyQuery(instance, method, parameters,
                     interfaceParams, entityParamIndex, deltaTimeParamIndex,
                     includeStorages, includeHasMethods,
-                    excludeStorages, excludeHasMethods, tagFilter, invoker), false);
+                    excludeStorages, excludeHasMethods, tagFilter, invoker, budget), false);
 
             return (BuildConcreteQuery(instance, method, parameters,
                 concreteParams, concreteStorages, concreteGetMethods, concreteHasMethods,
@@ -122,7 +124,7 @@ namespace EOS.Systems
                 interfaceParams,
                 entityParamIndex, deltaTimeParamIndex,
                 includeStorages, includeHasMethods,
-                excludeStorages, excludeHasMethods, tagFilter, invoker), false);
+                excludeStorages, excludeHasMethods, tagFilter, invoker, budget), false);
         }
 
         (Action<float> body, IEventChannel channel, int slot) BuildEventQuery(object instance, MethodInfo method, SystemInvoker invoker)
@@ -245,8 +247,9 @@ namespace EOS.Systems
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
-            SystemInvoker invoker)
+            SystemInvoker invoker, int budget)
         {
+            int offset = 0;
             return (deltaTime, _) =>
             {
                 int pivot = 0;
@@ -258,6 +261,10 @@ namespace EOS.Systems
                     if (c < min) { min = c; pivot = j; }
                 }
                 if (min == int.MaxValue) min = 0;
+
+                int skip = budget > 0 ? offset : 0;
+                int matched = 0;
+                int processed = 0;
 
                 for (int i = 0; i < min; i++)
                 {
@@ -272,6 +279,9 @@ namespace EOS.Systems
 
                     if (!tagFilter.Matches(entity)) continue;
 
+                    if (budget > 0 && matched < skip) { matched++; continue; }
+                    matched++;
+
                     var combos = ResolveInterfaceCombinations(entity, interfaceParams);
                     if (combos == null) continue;
 
@@ -280,7 +290,11 @@ namespace EOS.Systems
                             deltaTimeParamIndex, entityParamIndex,
                             concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, pivot, i,
                             interfaceParams, combos[c], 0UL));
+
+                    if (budget > 0 && ++processed >= budget) break;
                 }
+
+                if (budget > 0) offset = processed >= budget ? matched : 0;
             };
         }
 
@@ -293,8 +307,11 @@ namespace EOS.Systems
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
-            SystemInvoker invoker)
+            SystemInvoker invoker, int budget, ReactiveBudgetState budgetState)
         {
+            int reactiveCount = concreteParams.Count(p => p.channel != Channel.None)
+                                + interfaceParams.Count(p => p.channel != Channel.None);
+
             int driverConcrete = concreteParams.FindIndex(p => p.channel != Channel.None && !p.optional);
 
             if (driverConcrete >= 0)
@@ -308,9 +325,64 @@ namespace EOS.Systems
                         concreteParams, interfaceParams, driver, driverConcrete, driverCascade,
                         entityParamIndex, deltaTimeParamIndex,
                         includeStorages, includeHasMethods,
-                        excludeStorages, excludeHasMethods, tagFilter, invoker);
+                        excludeStorages, excludeHasMethods, tagFilter, invoker, budget, budgetState);
 
                 bool driverRequiresReady = ChannelRequiresReady(driverChannel);
+
+                if (budget > 0 && reactiveCount > 1)
+                    EosLog.Warning($"{instance.GetType().Name}.Execute: [Budget] on a query with multiple reactive parameters is not supported (would risk dropping an edge); running without a per-frame budget", nameof(SystemsRunner));
+
+                if (budget > 0 && budgetState != null && reactiveCount == 1)
+                {
+                    var pending = new List<(int index, ulong version)>();
+                    return (deltaTime, cursor) =>
+                    {
+                        if (ChannelMax(driver, driverChannel) <= cursor) return;
+
+                        pending.Clear();
+                        int count = driver.Count;
+                        for (int i = 0; i < count; i++)
+                        {
+                            if (driverRequiresReady && !driver.IsReady(i)) continue;
+                            if (!ChannelPasses(driver, i, driverChannel, driverCascade, cursor)) continue;
+                            pending.Add((i, ChannelVersionAt(driver, i, driverChannel)));
+                        }
+                        if (pending.Count == 0) return;
+                        pending.Sort(ByVersion);
+
+                        int processed = 0;
+                        for (int k = 0; k < pending.Count; k++)
+                        {
+                            var (i, version) = pending[k];
+                            var entity = driver.GetOwner(i);
+
+                            if (ReactiveConcreteMatch(entity, concreteParams, concreteIndexed,
+                                    concreteHasMethods, concreteStorages, driverConcrete, cursor)
+                                && CheckIncludeExclude(entity,
+                                    includeStorages, includeHasMethods,
+                                    excludeStorages, excludeHasMethods)
+                                && tagFilter.Matches(entity))
+                            {
+                                var combos = ResolveInterfaceCombinationsReactive(entity, interfaceParams, cursor);
+                                if (combos != null)
+                                {
+                                    for (int c = 0; c < combos.Count; c++)
+                                        Invoke(invoker, instance, method, BuildArgs(parameters, entity, deltaTime,
+                                            deltaTimeParamIndex, entityParamIndex,
+                                            concreteParams, concreteStorages, concreteGetMethods, concreteIndexed, driverConcrete, i,
+                                            interfaceParams, combos[c], cursor));
+                                    processed++;
+                                }
+                            }
+
+                            if (processed >= budget)
+                            {
+                                if (k + 1 < pending.Count) budgetState.NextCursor = version;
+                                break;
+                            }
+                        }
+                    };
+                }
 
                 return (deltaTime, cursor) =>
                 {
@@ -346,6 +418,9 @@ namespace EOS.Systems
             }
             else
             {
+                if (budget > 0)
+                    EosLog.Warning($"{instance.GetType().Name}.Execute: [Budget] is not supported on interface-driven reactive queries; running without a per-frame budget", nameof(SystemsRunner));
+
                 var driverIface = interfaceParams.FirstOrDefault(p => p.channel != Channel.None && !p.optional);
                 if (driverIface.type == null)
                 {
@@ -417,7 +492,7 @@ namespace EOS.Systems
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
-            SystemInvoker invoker)
+            SystemInvoker invoker, int budget, ReactiveBudgetState budgetState)
         {
             if (concreteParams.Count != 1 || interfaceParams.Count != 0)
             {
@@ -427,6 +502,50 @@ namespace EOS.Systems
 
             int removedPosition = concreteParams[driverConcrete].position;
             int length = parameters.Length;
+
+            if (budget > 0 && budgetState != null)
+            {
+                return (deltaTime, cursor) =>
+                {
+                    if (driver.MaxRemoveVersion <= cursor) return;
+
+                    int count = driver.RemovedCount;
+                    int processed = 0;
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (driver.RemovedVersionAt(i) <= cursor) continue;
+                        if (!driverCascade && driver.RemovedCascadeAt(i)) continue;
+
+                        var entity = driver.RemovedOwnerAt(i);
+
+                        if (CheckIncludeExclude(entity,
+                                includeStorages, includeHasMethods,
+                                excludeStorages, excludeHasMethods)
+                            && tagFilter.Matches(entity))
+                        {
+                            var args = new object[length];
+                            if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+                            if (entityParamIndex != -1) args[entityParamIndex] = entity;
+                            args[removedPosition] = null;
+                            Invoke(invoker, instance, method, args);
+                            processed++;
+                        }
+
+                        if (processed >= budget)
+                        {
+                            ulong version = driver.RemovedVersionAt(i);
+                            for (int j = i + 1; j < count; j++)
+                            {
+                                if (driver.RemovedVersionAt(j) <= cursor) continue;
+                                if (!driverCascade && driver.RemovedCascadeAt(j)) continue;
+                                budgetState.NextCursor = version;
+                                break;
+                            }
+                            break;
+                        }
+                    }
+                };
+            }
 
             return (deltaTime, cursor) =>
             {
@@ -460,7 +579,7 @@ namespace EOS.Systems
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
-            SystemInvoker invoker)
+            SystemInvoker invoker, int budget)
         {
             if (entityParamIndex == -1)
             {
@@ -472,10 +591,15 @@ namespace EOS.Systems
                 };
             }
 
+            int offset = 0;
             return (deltaTime, _) =>
             {
                 var args = new object[parameters.Length];
                 if (deltaTimeParamIndex != -1) args[deltaTimeParamIndex] = deltaTime;
+
+                int skip = budget > 0 ? offset : 0;
+                int matched = 0;
+                int processed = 0;
 
                 foreach (var entity in World.Entities.All())
                 {
@@ -487,9 +611,16 @@ namespace EOS.Systems
 
                     if (!tagFilter.Matches(entity)) continue;
 
+                    if (budget > 0 && matched < skip) { matched++; continue; }
+                    matched++;
+
                     args[entityParamIndex] = entity;
                     Invoke(invoker, instance, method, args);
+
+                    if (budget > 0 && ++processed >= budget) break;
                 }
+
+                if (budget > 0) offset = processed >= budget ? matched : 0;
             };
         }
 
@@ -499,7 +630,7 @@ namespace EOS.Systems
             int entityParamIndex, int deltaTimeParamIndex,
             object[] includeStorages, MethodInfo[] includeHasMethods,
             object[] excludeStorages, MethodInfo[] excludeHasMethods, TagFilter tagFilter,
-            SystemInvoker invoker)
+            SystemInvoker invoker, int budget)
         {
             var pivotParam = interfaceParams.FirstOrDefault(p => !p.optional);
             if (pivotParam.type == null)
@@ -509,12 +640,17 @@ namespace EOS.Systems
             }
             var pivotIfaceType = pivotParam.type;
 
+            int offset = 0;
             return (deltaTime, _) =>
             {
                 var pivotStorages = World.ObjectsStorages.GetByInterface(pivotIfaceType);
                 if (pivotStorages == null) return;
 
                 var seen = new HashSet<int>();
+                int skip = budget > 0 ? offset : 0;
+                int matched = 0;
+                int processed = 0;
+                bool stop = false;
 
                 foreach (var storage in pivotStorages)
                 {
@@ -534,6 +670,9 @@ namespace EOS.Systems
 
                         if (!tagFilter.Matches(entity)) continue;
 
+                        if (budget > 0 && matched < skip) { matched++; continue; }
+                        matched++;
+
                         var combos = ResolveInterfaceCombinations(entity, interfaceParams);
                         if (combos == null) continue;
 
@@ -549,8 +688,13 @@ namespace EOS.Systems
 
                             Invoke(invoker, instance, method, args);
                         }
+
+                        if (budget > 0 && ++processed >= budget) { stop = true; break; }
                     }
+                    if (stop) break;
                 }
+
+                if (budget > 0) offset = processed >= budget ? matched : 0;
             };
         }
 

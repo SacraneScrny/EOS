@@ -16,6 +16,8 @@ namespace EOS.Systems
     /// <summary>Discovers every <see cref="EosSystem"/> at world init, builds a per-phase query body for each, and drives them in topological order each frame.</summary>
     public partial class SystemsRunner : WorldBound
     {
+        const float NominalDelayStep = 1f / 60f;
+
         sealed class SystemEntry
         {
             public readonly Action<float, ulong> Body;
@@ -24,6 +26,8 @@ namespace EOS.Systems
             public readonly string Label;
             public readonly bool Reactive;
             public ulong Cursor;
+            public DelayState Delay;
+            public ReactiveBudgetState Budget;
 
             public SystemEntry(Action<float, ulong> body, Func<bool> isUpdate, Type type, string label, bool reactive, ulong cursor)
             {
@@ -34,6 +38,58 @@ namespace EOS.Systems
                 Reactive = reactive;
                 Cursor = cursor;
             }
+        }
+
+        const ulong MaxRetentionFrames = 4096;
+
+        sealed class DelayState
+        {
+            readonly bool _useFrames;
+            readonly float _intervalSeconds;
+            readonly int _intervalFrames;
+            float _accumSeconds;
+            int _accumFrames;
+            public ulong LastRunFrame;
+
+            public DelayState(float intervalSeconds)
+            {
+                _useFrames = false;
+                _intervalSeconds = intervalSeconds <= 0f ? 0f : intervalSeconds;
+                _accumSeconds = _intervalSeconds;
+            }
+
+            public DelayState(int intervalFrames)
+            {
+                _useFrames = true;
+                _intervalFrames = intervalFrames < 1 ? 1 : intervalFrames;
+                _accumFrames = _intervalFrames;
+            }
+
+            public bool Ready(float deltaTime)
+            {
+                if (_useFrames)
+                {
+                    _accumFrames++;
+                    if (_accumFrames < _intervalFrames) return false;
+                    _accumFrames = 0;
+                    return true;
+                }
+                _accumSeconds += deltaTime;
+                if (_accumSeconds < _intervalSeconds) return false;
+                _accumSeconds -= _intervalSeconds;
+                if (_accumSeconds > _intervalSeconds) _accumSeconds = 0f;
+                return true;
+            }
+
+            public ulong WindowFrames(float nominalStep)
+                => _useFrames
+                    ? (ulong)_intervalFrames
+                    : (ulong)Math.Max(1, (int)Math.Ceiling(_intervalSeconds / Math.Max(1e-6f, nominalStep)));
+        }
+
+        sealed class ReactiveBudgetState
+        {
+            public ulong NextCursor;
         }
 
         sealed class EventEntry
@@ -200,6 +256,9 @@ namespace EOS.Systems
                     var sig = SystemSignature.Of(method);
                     Action<float, ulong> body;
                     bool reactive;
+                    var budgetAttr = method.GetCustomAttribute<BudgetAttribute>();
+                    int budgetN = budgetAttr != null && budgetAttr.MaxPerFrame > 0 ? budgetAttr.MaxPerFrame : 0;
+                    ReactiveBudgetState budgetState = null;
                     try
                     {
                         var binder = generated?.GetBody(sig);
@@ -227,9 +286,11 @@ namespace EOS.Systems
                         }
                         else
                         {
-                            if (generated != null && !stale)
+                            if (generated != null && !stale && budgetN == 0)
                                 EosLog.Warning($"{type.Name}.{method.Name}: no generated typed body, falling back to reflection (unsupported shape or stale registry — regenerate)", nameof(SystemsRunner));
-                            (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(sig));
+                            if (budgetN > 0 && SystemShape.IsReactive(method))
+                                budgetState = new ReactiveBudgetState();
+                            (body, reactive) = BuildQuery(instance, method, generated?.GetInvoker(sig), budgetN, budgetState);
                         }
                     }
                     catch (Exception ex)
@@ -237,7 +298,11 @@ namespace EOS.Systems
                         EosLog.Error($"{type.Name}.{method.Name}: {ex.Message}", nameof(SystemsRunner));
                         continue;
                     }
-                    var entry = new SystemEntry(body, isUpdate, type, type.Name, reactive, reactive ? World.Version : 0UL);
+                    var entry = new SystemEntry(body, isUpdate, type, type.Name, reactive, reactive ? World.Version : 0UL)
+                    {
+                        Delay = BuildDelay(method, type),
+                        Budget = reactive ? budgetState : null
+                    };
 
                     switch (instance.UpdateType)
                     {
@@ -255,6 +320,8 @@ namespace EOS.Systems
             TopologicalSort(_eventUpdate, e => e.Type);
             TopologicalSort(_eventFixedUpdate, e => e.Type);
             TopologicalSort(_eventLateUpdate, e => e.Type);
+
+            World.SetReactiveRetentionFrames(ComputeRetentionFrames());
 
             foreach (var system in _all)
             {
@@ -290,26 +357,69 @@ namespace EOS.Systems
             }
         }
 
+        DelayState BuildDelay(MethodInfo method, Type type)
+        {
+            var delay = method.GetCustomAttribute<DelayAttribute>();
+            var delayFrame = method.GetCustomAttribute<DelayFrameAttribute>();
+            if (delay != null && delayFrame != null)
+            {
+                EosLog.Warning($"{type.Name}.{method.Name}: both [Delay] and [DelayFrame] present, using [DelayFrame]", nameof(SystemsRunner));
+                return new DelayState(delayFrame.Frames);
+            }
+            if (delayFrame != null) return new DelayState(delayFrame.Frames);
+            if (delay != null) return new DelayState(delay.Seconds);
+            return null;
+        }
+
+        ulong ComputeRetentionFrames()
+        {
+            ulong retention = EventsContainer.MaxAge;
+            void Scan(List<SystemEntry> systems)
+            {
+                for (int i = 0; i < systems.Count; i++)
+                {
+                    var delay = systems[i].Delay;
+                    if (delay == null) continue;
+                    ulong window = delay.WindowFrames(NominalDelayStep);
+                    if (window > retention) retention = window;
+                }
+            }
+            Scan(_update);
+            Scan(_fixedUpdate);
+            Scan(_lateUpdate);
+            return retention;
+        }
+
         void Run(List<SystemEntry> systems, float deltaTime)
         {
             for (int i = 0; i < systems.Count; i++)
             {
                 var entry = systems[i];
                 ulong now = World.Version;
+                bool slept = false;
+                bool ran = false;
                 try
                 {
-                    if (entry.Reactive)
+                    if (entry.IsUpdate())
                     {
-                        if (entry.IsUpdate())
+                        if (entry.Delay != null && !entry.Delay.Ready(deltaTime))
                         {
-                            using (EosProfiler.Sample(entry.Label))
-                                entry.Body(deltaTime, entry.Cursor);
+                            slept = true;
                         }
-                    }
-                    else if (entry.IsUpdate())
-                    {
-                        using (EosProfiler.Sample(entry.Label))
-                            entry.Body(deltaTime, 0UL);
+                        else
+                        {
+                            ran = true;
+                            if (entry.Delay != null)
+                            {
+                                ulong gap = World.Frame - entry.Delay.LastRunFrame;
+                                entry.Delay.LastRunFrame = World.Frame;
+                                if (gap > World.ReactiveRetentionFrames && gap <= MaxRetentionFrames)
+                                    World.SetReactiveRetentionFrames(gap);
+                            }
+                            if (entry.Budget != null) entry.Budget.NextCursor = now;
+                            using (EosProfiler.Sample(entry.Label))
+                                entry.Body(deltaTime, entry.Reactive ? entry.Cursor : 0UL);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -318,7 +428,8 @@ namespace EOS.Systems
                 }
                 finally
                 {
-                    entry.Cursor = now;
+                    if (entry.Reactive && !slept)
+                        entry.Cursor = entry.Budget != null && ran ? entry.Budget.NextCursor : now;
                 }
             }
         }
